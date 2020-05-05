@@ -19,6 +19,15 @@ def pixel_value_rescale(img,dtype="uint8"):
         img = (scaled).astype(np.float32)
     return img
 
+def pixel_value_center(img):
+    """standardize pixel values of
+    image have zero mean and a 
+    standard deviation of 1
+    """
+    img = img.astype(np.float64)
+    centered = (img - img.mean()) / (img.std())
+    return centered.astype(np.float64)
+
 def crop_by_ratio(img,rrow,rcol):
     """Crop an image, specifying the border to remove as a ratio.
     Args:
