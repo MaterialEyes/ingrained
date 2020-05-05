@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+import skimage.measure as skim
 from skimage.draw import polygon
 from skimage.transform import resize
 from sklearn.preprocessing import MinMaxScaler
@@ -181,3 +182,8 @@ def score_vifp(im_true,im_test,sigma=2):
     sc_true = MinMaxScaler(feature_range=(0, 255)).fit(im_true)
     sc_test = MinMaxScaler(feature_range=(0, 255)).fit(im_test)
     return 1 - vifp_mscale(sc_true.transform(im_true),sc_test.transform(im_test),sigma_nsq=sigma)
+
+def score_ssim(im_true,im_test,win_size=None):
+	im_true = pixel_value_center(im_true)
+	im_test = pixel_value_center(im_test)
+    return 1 - skim.compare_ssim(im_true,im_test,win_size)
