@@ -23,7 +23,7 @@ cd ingrained
 ```
 Set your [Materials Project API key](https://materialsproject.org/open) "MAPI_KEY" environment variable:
 ```python
-./bin/setkey.sh mYaPiKey
+./bin/setkey.sh mYaPiKeY
 ```
 Install package with pip:
 ```sh
