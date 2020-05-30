@@ -21,9 +21,9 @@ conda activate ingrained
 cd ingrained
 ./bin/download.sh
 ```
-Navigate to the [<code>structure.py</code>](https://github.com/MaterialEyes/ingrained/blob/master/ingrained/structure.py) module and set your [Materials Project API key](https://materialsproject.org/open) "MAPI_KEY" environment variable.
+Set your [Materials Project API key](https://materialsproject.org/open) "MAPI_KEY" environment variable:
 ```python
-os.environ['MAPI_KEY'] = "YOUR MP API Key"
+./bin/setkey.sh 123mYmPaPiKeY456 
 ```
 Install package with pip:
 ```sh
