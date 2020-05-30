@@ -23,7 +23,6 @@ VERSION = '0.1.0'
 
 # What packages are required for this module to be executed?
 REQUIRED = [
-        'ase',
         'opencv-python',
         'pillow>=2.3.1',
         'scipy',
