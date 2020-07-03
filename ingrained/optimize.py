@@ -1,568 +1,523 @@
 import os
-import cv2
-import pySPM
-import random
-import warnings
-# import subprocess
 import numpy as np
-import dm3_lib as dm3lib
 import matplotlib.pyplot as plt
-from sklearn.preprocessing import MinMaxScaler
-# from pymatgen.io.vasp import Poscar, Structure, Lattice
 
-from scipy.optimize import minimize
-from skimage.draw import polygon
 from skimage.filters import rank
 from skimage.morphology import disk
-from skimage.transform import resize
-from skimage.util import img_as_ubyte
-from skimage.exposure import equalize_adapthist
-from skimage.feature import register_translation
-from skimage.restoration import denoise_tv_chambolle
+from skimage.registration import phase_cross_correlation
 
-from .image_ops import *
+from scipy.optimize import minimize
 
-# define Python user-defined exceptions
-class Error(Exception):
-   """Base class for other exceptions"""
-   pass
-class RegistrationSizeError(Error):
-   """Raised when the input value is too large"""
-   pass
-class RegistrationSizeError(Error):
-   """Raised when the input value is too large"""
-   pass
-class SimulationSizeError(Error):
-   """Raised when the input value is too large"""
-   pass
+import ingrained.image_ops as iop
 
-class CongruityBuilder(object):                   
-    def __init__(self, bicrystal, dm3, objective='taxicab_vifp', optimizer='COBYLA'): 
-
-        self.structure = bicrystal
-        self.dm3_path  = dm3
-
-    @staticmethod
-    def _create_inset_window(fixed, coords=None ,moving=None, vertical_bias=0, horizontal_bias=0.125):
-        """
-        Create an inset window (turn off pixels outside window) inside a 'fixed' image by providing 
-        a list of coordinate positions to assign to the window, or by a providing sliding window 
-        'moving' image plus vertical and horizontal biases to create an inset window that contains 
-        all translations of the 'moving' image within 'fixed'. 
-
-        Args:
-            fixed: A numpy array of the fixed image on which inset is created
-            coords (optional): A list of tuples providing the coordinates of the window
-            moving (optional): A numpy array of the moving image whose translations must be contained within fixed
-            vertical_bias: A float (percentage) of the window to crop in the vertical direction
-            horizontal_bias: A float (percentage) of the window to crop in the horizontal direction
-
-        Returns:
-            The fixed image (numpy array) with all pixels outside the windoe set to 0
-        """
-        rfix, cfix = np.shape(fixed)
-        if moving is not None:
-            rmov, cmov = np.shape(moving)
-            # print(rmov, cmov)
-            # Define boundaries based on input biases and ensure start<end
-            rstt, rend = np.sort([int(np.ceil((rmov/2)+0.1))+int(horizontal_bias*(rmov/2)), \
-                                  int(np.floor(rfix-(rmov/2)))-int(horizontal_bias*(rmov/2))])
-            cstt, cend = np.sort([int(np.ceil((cmov/2)+0.1))+int(vertical_bias*(cmov/2)), \
-                                  int(np.floor(cfix-(cmov/2)))-int(vertical_bias*(cmov/2))])
-            # For the special case where start and end are the same:
-            rstt, rend = ([rstt,rend],[rstt-1,rend+1])[rstt==rend]
-            cstt, cend = ([cstt,cend],[cstt-1,cend+1])[cstt==cend]
-
-            # Mask border around similarity_map to contain all possible translations of moving_downsample on fixed_downsample
-            return cv2.copyMakeBorder(fixed[rstt:rend,cstt:cend],rstt,rfix-rend,cstt,cfix-cend,cv2.BORDER_CONSTANT,value=0)
-        
-        if coords is not None:
-            # Create a mask and multiply with fixed
-            mask = fixed.copy()
-            mask[[xy[0] for xy in coords],[xy[1] for xy in coords]]= 100
-            return (mask > 99) * fixed 
-
-    @staticmethod
-    def _windowed_histogram_similarity(fixed, moving):
-        """
-        For each pixel in the 'fixed', a histogram of the greyscale values in a region of the image 
-        surrounding the pixel is computed and compared to a histogram of the greyscale values in the
-        'moving' window to produce a similarity map, which indicates the level of similarity between 
-        the 'moving' window centered on that pixel and the fixed image. 
-
-        Adapted from: http://devdoc.net/python/scikit-image-doc-0.13.1/auto_examples/...
-        features_detection/plot_windowed_histogram.htm
-        
-        Args:
-            fixed: A numpy array of the fixed image on which the 'moving' image is slid across
-            moving: A numpy array of the moving image slid across 'fixed' 
-
-        Returns:
-            A Chi squared similarity map (numpy array)
-        """
-        # Get row/col sizes for fixed (similarity map) and the image being shifted around
-        row_fix, col_fix = np.shape(fixed)
-        row_mov, col_mov = np.shape(moving)
-
-        try: 
-            if row_fix<row_mov or col_fix<col_mov:
-                raise SimulationSizeError
-        except:
-            print("Error: Simulated image size exceeds its experimental target!")
-            return None
-
-        # Compute histogram for simulated image and normalize
-        h_mov, _ = np.histogram(moving.flatten(), bins=16, range=(0, 16))
-        h_mov = h_mov.astype(float) / np.sum(moving)
-
-        # Compute normalized windowed histogram feature vector for each pixel (using a disk shaped mask)
-        px_histograms = rank.windowed_histogram(img_as_ubyte(fixed), selem=disk(30), n_bins=h_mov.shape[0])
-
-        # Reshape coin histogram to (1,1,N) for broadcast when we want to use it in
-        # arithmetic operations with the windowed histograms from the image
-        h_mov = h_mov.reshape((1, 1) + h_mov.shape)
-
-        # Compute Chi squared distance metric: sum((X-Y)^2 / (X+Y));
-        denom = px_histograms + h_mov
-        denom[denom == 0] = np.infty
-        frac = num = (px_histograms - h_mov) ** 2 / denom
-        chi_sqr = 0.5 * np.sum(frac, axis=2)
-
-        # Use a Chi squared similarity measure. 
-        return 1 / (chi_sqr + 1.0e-4)
-
-    @staticmethod
-    def _taxicab_translation_distance(similarity_map,moving,fixed,max_iteration=10000):
-        """
-        Find the central coordinate which best fixes moving on fixed by minimizing 
-        'taxicab' translation distance in an interative loop.
-        
-        Args:
-            similariy_map: A numpy array indicating level of similarity b/w moving & fixed at each pixel
-            fixed: A numpy array of the fixed image on which the 'moving' image is slid across
-            moving: A numpy array of the moving image slid across 'fixed' 
-            max_iteration: An int for the maximum iterations of the registration loop 
-
-        Returns:
-            A numpy array of the cropped 'fixed' that best matches 'moving'
-            Central coordinate (pixel) of optimal position for 'moving' on 'fixed'
-            Taxicab distance (int) between 'moving' and 'fixed'
-        """
-        shift_errors = 1e5*np.zeros(max_iteration)
-        keep_indices = []
-        i, shift = 0,-99
-
-        while (i < max_iteration) and (np.sum(np.abs(shift)) > 0):
-
-            # find indices of max similarity point
-            current_best = np.unravel_index(similarity_map.argmax(), similarity_map.shape)
-            experiment_patch = cutout_around_pixel(moving,fixed,current_best) 
-
-            try: 
-                if np.shape(moving) != np.shape(experiment_patch):
-                    raise RegistrationSizeError
-            except:
-                print("Error: Registration requires image size agreement!")
-                return None, None, None
+class CongruityBuilder(object):      
+    """
+    Find optimal correspondence "congruity" between a simulated and experimental image.
+    Posed as a “jigsaw puzzle” problem where the experimental image is fixed and the goal 
+    of optimization is to find a set of simulation parameters, 𝜃, that produce an image 
+    that can be arranged in such a way inside the experimental image that minimizes: 
     
-            shift, error, diffphase = register_translation(moving,experiment_patch)   
-
-            shift_errors[i] = np.sum(np.abs(shift))
-            keep_indices.append(current_best)
-
-            similarity_map[current_best] = 0
-
-            if i == max_iteration-1:
-                possible_idx = np.where(shift_errors == shift_errors.min())[0]
-                current_best = keep_indices[possible_idx[np.argmin(np.abs((max_iteration/2)-possible_idx))]]# Find min closest to center pixel
-                print('Warning: Proceed with caution! (SHIFT ERROR: {})'.format(int(np.sum(np.abs(shift)))))
-            i += 1
-
-        return experiment_patch, current_best, np.sum(np.abs(shift))
-
-    def fit(self, interface_width=0, defocus=1.0, border_reduce=(0,0), pixel_size="", save_simulation = "", save_experiment = "", denoise=False):
-        """
-        A wrapper around '_taxicab_translation_distance' that allows for adjustments of structure
-        and imaging parameters. Used in optimization loop to find set of parameters that yield
-        best fit between simulation and experiment.
-        
-        Args:
-            interface_width: A float that gives the spacing betweeen grains (relative to initial structure)
-            defocus: A float used to specify the microsopy parameter in simulation
-            border_reduce: A tuple that gives the extent of the vertical/horizontal border cropped during comparisons
-            save_simulation: An path to the generated simulated image 
-            save_simulation: An path to the appropriately cropped experimental image
-
-        Returns:
-            Both the 'fit' experimental and simulated image and the '_taxicab_translation_distance' between them
-        """
-        # Simulate an image using specified parameters
-        simulated_raw = self.structure.convolution_HAADF(filename=save_simulation, dm3=self.dm3_path, \
-                                                         pixel_size=pixel_size, interface_width=interface_width, \
-                                                         defocus=defocus, border_reduce=border_reduce)
-
-        # If simulation fails, None return for fit!
-        if simulated_raw is None:
-            return None, None, (None, None)
-
-        # Read dm3 image from file
-        dm3_image  = dm3lib.DM3(self.dm3_path).imagedata
-
-        # Perform total-variation denoising on experimental image
-        experiment_image  = denoise_tv_chambolle(dm3_image, weight=0.001, eps=0.005, n_iter_max=200)
-
-        # Perform contrast limited adaptive histogram equalization for local contrast enhancement on simulation
-        simulated_image   = equalize_adapthist(simulated_raw,clip_limit=0.5)
-
-        # Quantize to 16 levels of greyscale and downsample (output image will have a 16-dim feature vec per pixel)        
-        fixed_downsample  = custom_discretize(experiment_image,factor=4,mode="downsample")
-        moving_downsample = custom_discretize(simulated_image,factor=4,mode="downsample")
-
-        # Compute the similarity map for moving downsampled window across fixed downsampled image
-        similarity_map = self._windowed_histogram_similarity(fixed_downsample,moving_downsample)
-        
-        # If simulation is too large, None return for fit!
-        if similarity_map is None:
-            return None, None, (None, None)
-
-        # We are only interested in searching pixels towards the center of the image (with a slight horizontal bias)
-        similarity_map  = self._create_inset_window(similarity_map,moving=moving_downsample,vertical_bias=0, horizontal_bias=0.25)
-
-        # plt.imshow(similarity_map)
-        # plt.show()
-
-        # Find the optimal index on for moving image to be inset into the fixed image and return the associated cropped fixed image 
-        _ , index_ds, shift_ds = self._taxicab_translation_distance(similarity_map,moving_downsample,fixed_downsample,max_iteration=np.sum(similarity_map>0))
-
-        # If registration fails or is of low confidence (shift>0), None return for fit!
-        if shift_ds is None or shift_ds>20:
-            return None, None, (None, None)
-
-        # Get upsampled pixels around 'index_ds' and check to see if same upsampled version is locked in place 
-        upsampled_coordinates = get_rectangle_crds(np.array(index_ds)[0]*4-4, np.array(index_ds)[1]*4-4, (2*4)+1, (2*4)+1)
-        
-        upsampled_map = self._create_inset_window(np.ones(np.shape(experiment_image)),coords=upsampled_coordinates)
-
-        _ , index_us, shift_us = self._taxicab_translation_distance(upsampled_map, \
-                                                                    pixel_value_rescale(simulated_image,"uint4"), \
-                                                                    pixel_value_rescale(experiment_image,"uint4"), \
-                                                                    max_iteration=len(upsampled_coordinates))
-        
-        # If registration fails or is of low confidence (shift>4), None return for fit!
-        if shift_us is None or shift_us>30:
-            return None, None, (None, None)
-
-        if denoise:
-            # Get correspoinding cropped region of experimental image
-            experiment_raw_image = cutout_around_pixel(simulated_image,experiment_image,index_us)
-        else:
-            # Get correspoinding cropped region of experimental image
-            experiment_raw_image = cutout_around_pixel(simulated_image,dm3_image,index_us)
-
-        # Write the initial simulated image to file
-        if save_experiment:
-            os.makedirs(os.path.dirname(save_experiment), exist_ok=True)
-            experiment_raw_image = pixel_value_rescale(experiment_raw_image,dtype="uint8")
-            cv2.imwrite(save_experiment, experiment_raw_image)
-
-        return self.structure.haadf_image, experiment_raw_image, shift_us
-
-    def taxicab_vifp_objective(self,x):
-        interface_width, defocus, brdx, brdy, pixel_size = x
-        print("Current Solution: \n>>> IW : {}\n>>> DF : {}\n>>> PX : {}\n>>> BX : {}\n>>> BY : {}".format(interface_width, defocus, pixel_size, brdx, brdy))
-        simulated_raw, experiment_raw_image, shift_us = self.fit(interface_width=interface_width, defocus=defocus, border_reduce=(brdx,brdy), pixel_size=pixel_size, save_simulation = "", save_experiment = "",denoise=True)
-        if simulated_raw is not None:
-            match_vifp = score_vifp(simulated_raw,experiment_raw_image,sigma=2)
-            fom = 0.1*(shift_us)+match_vifp
-        else:
-            fom = 9999
-        print("🌀 FOM :",fom,"\n")
-        return fom
-
-    def find_correspondence(self,objective='taxicab_vifp', optimizer='COBYLA', initial_solution=[0,1.5,0.0,0.125,0.2], constraint_list=[]):
-
-        def make_constraint_list(c):
-            constraints = []
-            for idx in range(len(c)):
-                constraints.append({'type': 'ineq', 'fun': lambda t, idx=idx: t[idx] - c[idx][0]})
-                constraints.append({'type': 'ineq', 'fun': lambda t, idx=idx: c[idx][1] - t[idx]})
-            return constraints
-
-        if optimizer == 'COBYLA':
-            constraints = make_constraint_list(constraint_list)
-            return minimize(self.taxicab_vifp_objective, initial_solution, method='COBYLA',tol=1E-6,options={'disp': True, 'rhobeg': 0.25, 'catol': 0.01}, constraints=constraints)
-
-        if optimizer == 'Powell':
-            return minimize(self.taxicab_vifp_objective, initial_solution, method='Powell',tol=1E-6,options={'disp': True})
-
-class CongruityBuilderSTM(object):                   
-    def __init__(self, partial_charge, sxm, restrict_bounds, objective='taxicab_vifp', optimizer='Powell'): 
-
-        self.structure = partial_charge
-        self.sxm_path = sxm
-        self.restrict_bounds = restrict_bounds
-
-    @staticmethod
-    def _create_inset_window(fixed, coords=None ,moving=None, vertical_bias=0, horizontal_bias=0.125):
-        """
-        Create an inset window (turn off pixels outside window) inside a 'fixed' image by providing 
-        a list of coordinate positions to assign to the window, or by a providing sliding window 
-        'moving' image plus vertical and horizontal biases to create an inset window that contains 
-        all translations of the 'moving' image within 'fixed'. 
-
-        Args:
-            fixed: A numpy array of the fixed image on which inset is created
-            coords (optional): A list of tuples providing the coordinates of the window
-            moving (optional): A numpy array of the moving image whose translations must be contained within fixed
-            vertical_bias: A float (percentage) of the window to crop in the vertical direction
-            horizontal_bias: A float (percentage) of the window to crop in the horizontal direction
-
-        Returns:
-            The fixed image (numpy array) with all pixels outside the windoe set to 0
-        """
-        rfix, cfix = np.shape(fixed)
-        if moving is not None:
-            rmov, cmov = np.shape(moving)
-            # print(rmov, cmov)
-            # Define boundaries based on input biases and ensure start<end
-            rstt, rend = np.sort([int(np.ceil((rmov/2)+0.1))+int(horizontal_bias*(rmov/2)), \
-                                  int(np.floor(rfix-(rmov/2)))-int(horizontal_bias*(rmov/2))])
-            cstt, cend = np.sort([int(np.ceil((cmov/2)+0.1))+int(vertical_bias*(cmov/2)), \
-                                  int(np.floor(cfix-(cmov/2)))-int(vertical_bias*(cmov/2))])
-            # For the special case where start and end are the same:
-            rstt, rend = ([rstt,rend],[rstt-1,rend+1])[rstt==rend]
-            cstt, cend = ([cstt,cend],[cstt-1,cend+1])[cstt==cend]
-
-            # Mask border around similarity_map to contain all possible translations of moving_downsample on fixed_downsample
-            return cv2.copyMakeBorder(fixed[rstt:rend,cstt:cend],rstt,rfix-rend,cstt,cfix-cend,cv2.BORDER_CONSTANT,value=0)
-        
-        if coords is not None:
-            # Create a mask and multiply with fixed
-            mask = fixed.copy()
-            mask[[xy[0] for xy in coords],[xy[1] for xy in coords]]= 100
-            return (mask > 99) * fixed 
-
-    @staticmethod
-    def _windowed_histogram_similarity(fixed, moving):
-        """
-        For each pixel in the 'fixed', a histogram of the greyscale values in a region of the image 
-        surrounding the pixel is computed and compared to a histogram of the greyscale values in the
-        'moving' window to produce a similarity map, which indicates the level of similarity between 
-        the 'moving' window centered on that pixel and the fixed image. 
-
-        Adapted from: http://devdoc.net/python/scikit-image-doc-0.13.1/auto_examples/...
-        features_detection/plot_windowed_histogram.htm
-        
-        Args:
-            fixed: A numpy array of the fixed image on which the 'moving' image is slid across
-            moving: A numpy array of the moving image slid across 'fixed' 
-
-        Returns:
-            A Chi squared similarity map (numpy array)
-        """
-        # Get row/col sizes for fixed (similarity map) and the image being shifted around
-        row_fix, col_fix = np.shape(fixed)
-        row_mov, col_mov = np.shape(moving)
-
-        try: 
-            if row_fix<row_mov or col_fix<col_mov:
-                raise SimulationSizeError
-        except:
-            print("Error: Simulated image size exceeds its experimental target!")
-            return None
-
-        # Compute histogram for simulated image and normalize
-        h_mov, _ = np.histogram(moving.flatten(), bins=16, range=(0, 16))
-        h_mov = h_mov.astype(float) / np.sum(moving)
-
-        # Compute normalized windowed histogram feature vector for each pixel (using a disk shaped mask)
-        px_histograms = rank.windowed_histogram(img_as_ubyte(fixed), selem=disk(30), n_bins=h_mov.shape[0])
-
-        # Reshape coin histogram to (1,1,N) for broadcast when we want to use it in
-        # arithmetic operations with the windowed histograms from the image
-        h_mov = h_mov.reshape((1, 1) + h_mov.shape)
-
-        # Compute Chi squared distance metric: sum((X-Y)^2 / (X+Y));
-        denom = px_histograms + h_mov
-        denom[denom == 0] = np.infty
-        frac = num = (px_histograms - h_mov) ** 2 / denom
-        chi_sqr = 0.5 * np.sum(frac, axis=2)
-
-        # Use a Chi squared similarity measure. 
-        return 1 / (chi_sqr + 1.0e-4)
-
-    @staticmethod
-    def _taxicab_translation_distance(similarity_map,moving,fixed,max_iteration=10000):
-        """
-        Find the central coordinate which best fixes moving on fixed by minimizing 
-        'taxicab' translation distance in an interative loop.
-        
-        Args:
-            similariy_map: A numpy array indicating level of similarity b/w moving & fixed at each pixel
-            fixed: A numpy array of the fixed image on which the 'moving' image is slid across
-            moving: A numpy array of the moving image slid across 'fixed' 
-            max_iteration: An int for the maximum iterations of the registration loop 
-
-        Returns:
-            A numpy array of the cropped 'fixed' that best matches 'moving'
-            Central coordinate (pixel) of optimal position for 'moving' on 'fixed'
-            Taxicab distance (int) between 'moving' and 'fixed'
-        """
-        shift_errors = 1e5*np.zeros(max_iteration)
-        keep_indices = []
-        i, shift = 0,-99
-
-        while (i < max_iteration) and (np.sum(np.abs(shift)) > 0):
-
-            # find indices of max similarity point
-            current_best = np.unravel_index(similarity_map.argmax(), similarity_map.shape)
-            experiment_patch = cutout_around_pixel(moving,fixed,current_best) 
-
-            try: 
-                if np.shape(moving) != np.shape(experiment_patch):
-                    raise RegistrationSizeError
-            except:
-                print("Error: Registration requires image size agreement!")
-                return None, None, None
+    𝐽(𝜃)= 𝛼*d_TC(𝜃) + 𝛽*d_𝑆𝑆𝐼𝑀(𝜃)  
     
-            shift, error, diffphase = register_translation(moving,experiment_patch)   
+    - where d_TC(𝜃) is the taxicab distance required for optimal cross-correlation-based 
+      registration after upsampling (enforces consistency in the pattern across boundaries)
 
-            shift_errors[i] = np.sum(np.abs(shift))
-            keep_indices.append(current_best)
+    - where d_SSIM(𝜃) is the Structural Similarity Index Measure, which quantifies the visual 
+      similarity between the simulation and experiment patch (enforces visual consistency in 
+      the content within the patches)
 
-            similarity_map[current_best] = 0
+    - 𝛼, 𝛽 are weights to chosen to balance importance of the criteria
 
-            if i == max_iteration-1:
-                possible_idx = np.where(shift_errors == shift_errors.min())[0]
-                current_best = keep_indices[possible_idx[np.argmin(np.abs((max_iteration/2)-possible_idx))]]# Find min closest to center pixel
-                print('Warning: Proceed with caution! (SHIFT ERROR: {})'.format(int(np.sum(np.abs(shift)))))
-            i += 1
-
-        return experiment_patch, current_best, np.sum(np.abs(shift))
-
-    def fit(self, zthick="", ztol="", rho0="", rho_tol="", pixel_size="", rotation_angle="", save_simulation = "", save_experiment = "", display=False):
+    """
+    def __init__(self, sim_obj="", exp_img="", iter=0): 
         """
-        A wrapper around '_taxicab_translation_distance' that allows for adjustments of structure
-        and imaging parameters. Used in optimization loop to find set of parameters that yield
-        best fit between simulation and experiment.
-        
+        Initialize a CongruityBuilder object with a ingrained.structure and experimental image.
+                 
         Args:
-            interface_width: A float that gives the spacing betweeen grains (relative to initial structure)
-            defocus: A float used to specify the microsopy parameter in simulation
-            border_reduce: A tuple that gives the extent of the vertical/horizontal border cropped during comparisons
-            save_simulation: An path to the generated simulated image 
-            save_simulation: An path to the appropriately cropped experimental image
+            sim_obj: (ingrained.structure) one of Bicrystal or PartialCharge stuctures
+            exp_img: (np.array) the experimental image (consider preprocessing to enhance optimization solution)
+        """  
+        self.sim_obj = sim_obj
+        self.exp_img = exp_img
+        self.iter    = iter
+        
+    def fit(self, sim_params = [], display=False, bias_x=0.0, bias_y=0.0):
+        """
+        Find optimal correspondence between simulation and experiment for the specified parameters.
+
+        Args:
+            sim_params: (list) parameters required for the 'simulate_image' method in the sim_obj
+            display: (string) plt.show() for intermediate/final fit results 
+            bias_x: (float) reduce search area in the x-direction by a fraction
+            bias_y: (float) reduce search area in the y-direction by a fraction
 
         Returns:
-            Both the 'fit' experimental and simulated image and the '_taxicab_translation_distance' between them
-        """
+            Both 'fit' experimental and simulated image with the translation_distance between them and 
+            coodinates of the center pixel in the experiment
+        """ 
         # Simulate an image using specified parameters
-
-        simulated_raw = self.structure.stm(filename=save_simulation, dm3=self.sxm_path, \
-                                            pixel_size=pixel_size, rotation_angle=rotation_angle, \
-                                            zthick=zthick, ztol=ztol, rho0=rho0, rho_tol=rho_tol)
-
-        # If simulation fails, None return for fit!
-        if simulated_raw is None:
-            return None, None, (None, None)
-
-        # Read sxm image from file
-        sxm_image  = pySPM.SXM(self.sxm_path).get_channel('Z', direction='both',corr="slope").pixels
-
-        # Restrict search area to clean part of sample
-        # rrow_start, rrow_end = (0.10,0.65)
-        # rcol_start, rcol_end = (0.4,1.0)
-
-        (rrow_start, rrow_end) , (rcol_start, rcol_end) = self.restrict_bounds
-
-        experiment_image = sxm_image[int(np.floor(np.shape(sxm_image)[0]*rrow_start)):int(np.floor(np.shape(sxm_image)[0]*rrow_end)),\
-                                     int(np.floor(np.shape(sxm_image)[1]*rcol_start)):int(np.floor(np.shape(sxm_image)[1]*rcol_end))]
-
-        # Works well!
-        # experiment_image = experiment_image[int(np.floor(np.shape(experiment_image)[0]*0.10)):int(np.floor(np.shape(experiment_image)[0]*0.65)),int(np.floor(np.shape(experiment_image)[1]*0.40))::]
-
-        # Perform contrast limited adaptive histogram equalization for local contrast enhancement on simulation
-        # simulated_image   = equalize_adapthist(simulated_raw,clip_limit=0.5)
-        simulated_image   = simulated_raw
-
-        # Quantize to 16 levels of greyscale and downsample (output image will have a 16-dim feature vec per pixel)        
-        fixed_downsample  = custom_discretize(experiment_image,factor=4,mode="downsample")
-        moving_downsample = custom_discretize(simulated_image,factor=4,mode="downsample")
-
-        # Compute the similarity map for moving downsampled window across fixed downsampled image
-        similarity_map = self._windowed_histogram_similarity(fixed_downsample,moving_downsample)
+        sim_img = self.sim_obj.simulate_image(sim_params=sim_params)
         
-        # If simulation is too large, None return for fit!
-        if similarity_map is None:
-            return None, None, (None, None)
-
-        # We are only interested in searching pixels towards the center of the image (with a slight horizontal bias)
-        similarity_map  = self._create_inset_window(similarity_map,moving=moving_downsample,vertical_bias=0, horizontal_bias=0)
-
-        # Find the optimal index on for moving image to be inset into the fixed image and return the associated cropped fixed image 
-        _ , index_ds, shift_ds = self._taxicab_translation_distance(similarity_map,moving_downsample,fixed_downsample,max_iteration=np.sum(similarity_map>0))
-
-        # If registration fails or is of low confidence (shift>0), None return for fit!
-        if shift_ds is None or shift_ds>20:
-            return None, None, (None, None)
-
-        # Get upsampled pixels around 'index_ds' and check to see if same upsampled version is locked in place 
-        upsampled_coordinates = get_rectangle_crds(np.array(index_ds)[0]*4-4, np.array(index_ds)[1]*4-4, (2*4)+1, (2*4)+1)
+        # Display simulated image
+        # self.sim_obj.display()
         
-        upsampled_map = self._create_inset_window(np.ones(np.shape(experiment_image)),coords=upsampled_coordinates)
-
-        _ , index_us, shift_us = self._taxicab_translation_distance(upsampled_map, \
-                                                                    pixel_value_rescale(simulated_image,"uint4"), \
-                                                                    pixel_value_rescale(experiment_image,"uint4"), \
-                                                                    max_iteration=len(upsampled_coordinates))
+        # Read experimental image
+        exp_img = self.exp_img.copy()
         
+        # Downsample (with quantization) both simulated and experimental images
+        # ds_by_factor = 2
+        ds_by_factor = 4
+        ds_sim_img = iop.apply_quantize_downsample(sim_img, factor=ds_by_factor)
+        ds_exp_img = iop.apply_quantize_downsample(exp_img, factor=ds_by_factor)
+        
+        # Compute the Chi-squared (correlation) map for moving the downsampled simulation across downsampled experiment
+        similarity_map = self.windowed_histogram_similarity(fixed=ds_exp_img, moving=ds_sim_img, bias_x=bias_x, bias_y=bias_y)
+        # plt.imshow(similarity_map,cmap='hot'); plt.show()
+
+        # Find pixel of fixed image where moving image can be positioned and not need further translation to improve similarity score
+        ds_exp_patch, ds_stable_idxs, ds_shift_score = self.stabilize_inset_map(fixed=ds_exp_img, moving=ds_sim_img, similarity_map=similarity_map)
+        
+        # Quantizate both original simulated and experimental images (without downsampling, i.e. factor = 1)
+        qt_sim_img = iop.apply_quantize_downsample(sim_img, factor=1)
+        qt_exp_img = iop.apply_quantize_downsample(exp_img, factor=1)
+        
+        # Get upsampled idxs around 'ds_stable_idxs' 
+        us_coords = iop.pixels_within_rectangle(np.array(ds_stable_idxs)[0]*ds_by_factor-ds_by_factor, 
+                                                np.array(ds_stable_idxs)[1]*ds_by_factor-ds_by_factor, 
+                                                (2*ds_by_factor)+1, (2*ds_by_factor)+1)
+        
+        # Check if moving image is locked in place over upsampled (original spatial resolution) images
+        us_exp_patch, us_stable_idxs, us_shift_score = self.stabilize_inset_coords(fixed=qt_exp_img, moving=qt_sim_img, critical_idxs=us_coords)
+        
+        # Get the shape of the moving image (size used as reference to extract exp_patch)
+        nrows, ncols = np.shape(sim_img)
+        
+        # Get best fit experiment patch after search (us_exp_patch is quantized, we want patch from original image w/o quantization!)
+        exp_patch = exp_img[int(us_stable_idxs[0]-(nrows-1)/2):int(us_stable_idxs[0]+(nrows-1)/2)+1,\
+                            int(us_stable_idxs[1]-(ncols-1)/2):int(us_stable_idxs[1]+(ncols-1)/2)+1]
+        
+        # Convert to grayscale for viewing
+        gs_exp_img = iop.scale_pixels(exp_patch,mode='grayscale')
+        gs_sim_img = iop.scale_pixels(sim_img,mode='grayscale')
+    
         if display:
-            insert_image_patch_STM(simulated_image,experiment_image,upsampled_map,index_us,save_simulation.split("/")[0])
+            # Display matching pair after downsample stabilized
+            plt.imshow(np.hstack([ds_exp_patch,15*np.ones((np.shape(ds_exp_patch)[0],5)),ds_sim_img]),cmap='hot'); plt.axis('off');
+            plt.show();
 
-        # If registration fails or is of low confidence (shift>4), None return for fit!
-        if shift_us is None or shift_us>30:
-            return None, None, (None, None)
+            # Display matching pair after upsample stabilized
+            plt.imshow(np.hstack([us_exp_patch,15*np.ones((np.shape(us_exp_patch)[0],5)),qt_sim_img]),cmap='hot'); plt.axis('off');
+            plt.show()
 
-        experiment_raw_image = cutout_around_pixel(simulated_image,experiment_image,index_us)
+            # Display matching pair (native resolution) stabilized
+            plt.imshow(np.hstack([gs_exp_img,255*np.ones((np.shape(gs_exp_img)[0],5)),gs_sim_img]),cmap='hot'); plt.axis('off');
+            plt.show()
+        return sim_img, exp_patch, us_shift_score, us_stable_idxs
+    
+    def fit_gb(self, sim_params = [], display=False, bias_x=0.0, bias_y=0.15):
+        """
+        Find optimal correspondence between simulation and experiment for the specified parameters.
+        Bias added to search region which promotes searching closer to center of image (vertically)
 
-        # Write the initial simulated image to file
-        if save_experiment:
-            os.makedirs(os.path.dirname(save_experiment), exist_ok=True)
-            experiment_raw_image = pixel_value_rescale(experiment_raw_image,dtype="uint8")
-            cv2.imwrite(save_experiment, experiment_raw_image)
+        Args:
+            sim_params: (list) parameters required for the 'simulate_image' method in the sim_obj
+            bias_x: (float) reduce search area in the x-direction by a fraction
+            bias_y: (float) reduce search area in the y-direction by a fraction
 
-        plt.imshow(self.structure.stm_image); 
-        plt.show()
+        Returns:
+            Both 'fit' experimental and simulated image with the translation_distance between them and 
+            coodinates of the center pixel in the experiment
+        """ 
+        return self.fit(sim_params=sim_params, display=False, bias_x=bias_x, bias_y=bias_y)
 
-        return self.structure.stm_image, experiment_raw_image, shift_us
+    def windowed_histogram_similarity(self, fixed="", moving="", bias_x=0.0, bias_y=0.0):
+        """
+        Compute the Chi squared distance metric between the moving image across all pixels in the fixed image,
+        in an attempt to locate the moving image (or highly similar regions) within the original fixed image.
+        
+        Args:
+            fixed: (np.array) experimental image 
+            moving: (np.array) a simulated image patch (<= size of fixed image)
+            bias_x: (float) reduce search area in the x-direction by a fraction
+            bias_y: (float) reduce search area in the y-direction by a fraction
+            
+        Returns:
+            A similarity map indicating regions of high correlation (reciprocal of Chi-squared similarity) between moving and fixed.
+        """
+        # Compute histogram for simulated (moving) image, and normalize
+        moving_hist, _ = np.histogram(moving.flatten(), bins=16, range=(0, 16))
+        moving_hist = moving_hist.astype(float) / np.sum(moving_hist)
+                
+        # Find appropriate size for a disk shaped mask that will define the shape of the sliding window
+        radius = int((2/3) * np.max(np.shape(moving)))
+        selem  = disk(radius) # A disk is (2 * radius + 1) wide 
+           
+        # Compute normalized windowed histogram feature vector for each pixel in the fixed image
+        px_histograms = rank.windowed_histogram(fixed, selem=selem, n_bins=moving_hist.shape[0])
 
-    def taxicab_vifp_objective(self,x):
-        zval,ztol,rval,rtol,rang,pixs = x
-        print("Current Solution: \n>>> ZThk : {}\n>>> ZTol : {}\n>>> RVal : {}\n>>> RTol : {}\n>>> Ang  : {}\n>>> Pix  : {}".format(zval,ztol,rval,rtol,rang,pixs))
-        rval = float(rval)/1000
-        rtol = float(rtol)/1000
-        simulated_raw, experiment_raw_image, shift_us = self.fit(zthick=zval, ztol=ztol, rho0=rval, rho_tol=rtol, pixel_size=pixs, rotation_angle=rang, save_simulation = "", save_experiment = "", display=False)
-        if simulated_raw is not None:
-            match_vifp = score_vifp(simulated_raw,experiment_raw_image,sigma=2)
-            fom = 0.1*(shift_us)+match_vifp
+        # Reshape moving histogram to (1,1,N) for broadcast when we want to use it in
+        # arithmetic operations with the windowed histograms from the image
+        moving_hist = moving_hist.reshape((1, 1) + moving_hist.shape)
+        
+        # Compute Chi-squared distance metric: sum((X-Y)^2 / (X+Y));
+        denom = px_histograms + moving_hist
+        denom[denom == 0] = np.infty
+        frac = num = (px_histograms - moving_hist) ** 2 / denom
+        chi_sqr = 0.5 * np.sum(frac, axis=2)
+
+        # Use reciprocal of Chi-squared similarity measure to create a full similarity map
+        full_map = 1 / (chi_sqr + 1.0e-4)
+        similarity_map = full_map.copy()
+        
+        # Get half length/width + 1 of moving image and use to define border size on fixed (where no sliding window comparisons permitted)
+        pix_row = int(np.ceil(np.shape(moving)[0]/2) + 1)
+        pix_col = int(np.ceil(np.shape(moving)[1]/2) + 1)
+  
+        # Bias values can further restrict area where comparisons are made
+        pix_row += int(((np.shape(similarity_map)[0] - 2*pix_row) * bias_y)/2)
+        pix_col += int(((np.shape(similarity_map)[1] - 2*pix_col) * bias_x)/2)
+        
+        # Construct the final correlation map 
+        brd_col = np.zeros((pix_row,np.shape(similarity_map)[1]))
+        brd_row = np.zeros((np.shape(similarity_map)[0],pix_col))
+        
+        similarity_map = np.vstack([brd_col,similarity_map[pix_row:-pix_row,::],brd_col])
+        similarity_map = np.hstack([brd_row,similarity_map[::,pix_col:-pix_col],brd_row])
+        return similarity_map
+    
+    def stabilize_inset_map(self, fixed="", moving="", similarity_map=""):
+        """
+        Find position (center pixel) on the fixed image, where the moving image can be placed without 
+        further translation (or with minimal translation) to improve registration. The similarity map 
+        defines the order that the center pixels are tested.
+        
+        Args:
+            fixed: (np.array) experimental image 
+            moving: (np.array) a simulated image patch (<= size of fixed image)
+            similarity_map: (np.array) map of pixels measuring similarity between moving and fixed at a each center pixel
+            
+        Returns:
+            The stable center pixel and the correponding experimental patch (same size as moving image), 
+            as well as the absolute value of the shift vector (in pixels) required to register the images. 
+            A stable return is currently defined as having a shift error of zero.  
+        """
+        # Get the shape of the moving image
+        nrows, ncols = np.shape(moving)
+
+        # Find the index (row, col) with the current highest similarity
+        current_idx = np.unravel_index(similarity_map.argmax(), similarity_map.shape)
+
+        # Keep track of the current best index and shift score 
+        current_best = None
+
+        for i in range(np.sum(similarity_map > 0)):
+
+            # Get patch of fixed image that contains current_idx as the center pixel
+            fixed_patch = fixed[int(current_idx[0]-(nrows-1)/2):int(current_idx[0]+(nrows-1)/2)+1,\
+                                int(current_idx[1]-(ncols-1)/2):int(current_idx[1]+(ncols-1)/2)+1]
+
+            # Find shift required for maximum cross correlation
+            shift, __, __ = phase_cross_correlation(moving,fixed_patch)  
+
+            # Calculate shift score 
+            shift_score = np.sum(np.abs(shift))
+
+            # Check to see if shift score improved, if so, record the index!
+            if current_best == None or shift_score < current_best [2]:
+                current_best = [current_idx[0],current_idx[1],shift_score]
+
+            # If moving image cannot be further shifted to improve similarity with fixed, consider STABILIZED and break!
+            if shift_score == 0:
+                break
+
+            # If keep going, reset the current_idx to "0" (indicates that it has been tested)
+            similarity_map[current_idx] = 0
+
+            # Find next best option
+            current_idx = np.unravel_index(similarity_map.argmax(), similarity_map.shape)
+
+        if shift_score != 0:
+            print('Warning: Proceed with caution! (SHIFT ERROR: {})'.format(int(current_best[2])))
+
+        # Get best fit patch after search
+        fixed_patch = fixed[int(current_best[0]-(nrows-1)/2):int(current_best[0]+(nrows-1)/2)+1,\
+                            int(current_best[1]-(ncols-1)/2):int(current_best[1]+(ncols-1)/2)+1]
+        return fixed_patch, tuple(current_best[0:2]), int(current_best[2])
+
+    def stabilize_inset_coords(self, fixed="", moving="", critical_idxs=""):
+        """
+        Find position (center pixel) on the fixed image, where the moving image can be placed without 
+        further translation (or with minimal translation) to improve registration. The critical indices 
+        provided define the order that the center pixels are tested.
+        
+        Args:
+            fixed: (np.array) experimental image 
+            moving: (np.array) a simulated image patch (<= size of fixed image)
+            critical_idxs: (list) critical indices to test for stability 
+            
+        Returns:
+            The stable center pixel and the correponding experimental patch (same size as moving image), 
+            as well as the absolute value of the shift vector (in pixels) required to register the images. 
+            A stable return is currently defined as having a shift error of zero.  
+        """
+        # Get the shape of the moving image
+        nrows, ncols = np.shape(moving)
+
+        # Keep track of the current best index and shift score 
+        current_best = None
+
+        for current_idx in critical_idxs:
+
+            # Get patch of fixed image that contains current_idx as the center pixel
+            fixed_patch = fixed[int(current_idx[0]-(nrows-1)/2):int(current_idx[0]+(nrows-1)/2)+1,\
+                                int(current_idx[1]-(ncols-1)/2):int(current_idx[1]+(ncols-1)/2)+1]
+
+            # Find shift required for maximum cross correlation
+            shift, __, __ = phase_cross_correlation(moving,fixed_patch)  
+
+            # Calculate shift score 
+            shift_score = np.sum(np.abs(shift))
+
+            # Check to see if shift score improved, if so, record the index!
+            if current_best == None or shift_score < current_best [2]:
+                current_best = [current_idx[0],current_idx[1],shift_score]
+
+            # If moving image cannot be further shifted to improve similarity with fixed, consider STABILIZED and break!
+            if shift_score == 0:
+                break
+
+        if shift_score != 0:
+            print('Warning: Proceed with caution! (SHIFT ERROR: {})'.format(int(current_best[2])))
+
+        # Get best fit patch after search
+        fixed_patch = fixed[int(current_best[0]-(nrows-1)/2):int(current_best[0]+(nrows-1)/2)+1,\
+                            int(current_best[1]-(ncols-1)/2):int(current_best[1]+(ncols-1)/2)+1]
+        return fixed_patch, tuple(current_best[0:2]), int(current_best[2])
+
+    def display_panel(self, moving="", critical_idx="", iternum="", score="", cmap='hot', title_list = ["","",""],savename='fit.png'):
+        """
+        Plot simulations inside the experimental image after fitting
+
+        Args:
+            moving: (numpy array) image that will be fit inside experiment
+            critical_idx: (tuple) position where moving image will be set inside experiment
+            iternum: (int) optional, denotes the iteration that the fit was found, to appear as text
+            score: (int) optional, denotes the score of the fit, to appear as text
+            cmap: (string) choice of color map for display
+            title_list: (list) list of titles given to each panel
+            savename: (string) saveas name for display image
+        """
+
+        plt.rcParams["font.family"] = "Arial"
+
+        fixed  = self.exp_img.copy()
+        fixed  = iop.scale_pixels(fixed, mode='grayscale')
+        moving = iop.scale_pixels(moving, mode='grayscale')
+        
+        nrows, ncols = np.shape(moving)
+        rcrds = iop.pixels_within_rectangle(int(critical_idx[1]-(ncols-1)/2), int(critical_idx[0]-(nrows-1)/2), ncols, nrows)
+
+        base_img = fixed.copy()
+        filler = moving.flatten("F")
+
+        for i in range(len(rcrds)):
+            entry = rcrds[i]
+            base_img[entry[1],entry[0]] = filler[i]
+        
+        # Likely to make simulation square (not always good). Can delete this!
+        # moving = iop.apply_resize(moving, np.shape(fixed))
+
+        # Will make heights the same but keep aspect ratio
+        fac = np.shape(fixed)[0]/np.shape(moving)[0]
+        new_size = np.round((fac * np.array(np.shape(moving))),0).astype(np.int)
+        moving = iop.apply_resize(moving, new_size)
+
+        # Add border to simulation so appears uniform next to experiment (sizing)
+        try:
+            # Will work if fixed smaller than moving
+            brdx = 255*np.ones((int(np.shape(moving)[0]),int(np.floor((np.shape(fixed)[1] - np.shape(moving)[1])/2))))
+            moving = np.hstack([brdx,moving,brdx])
+        except:
+            pass
+        
+        # Ensure that all images are the same size (same as experiment)
+        moving = iop.apply_resize(moving, np.shape(fixed))
+        base_img = iop.apply_resize(base_img, np.shape(fixed))
+
+        fig, axes = plt.subplots(nrows=1, ncols=3)
+        fig.add_gridspec(nrows=1, ncols=3).update(wspace=0.0, hspace=0.0)
+  
+        axes[0].imshow(fixed, interpolation='quadric', cmap=cmap)
+        axes[0].set_title(title_list[0],fontsize=8.5)
+        axes[0].axis('off')
+
+        axes[1].imshow(moving  , interpolation='quadric', cmap=cmap)
+        axes[1].set_title(title_list[1],fontsize=9)
+        axes[1].axis('off')
+
+        axes[2].imshow(base_img, interpolation='quadric', cmap=cmap)
+        axes[2].set_title(title_list[2],fontsize=9)
+        axes[2].axis('off')
+        
+        pnt1 = np.min(rcrds,axis=0)
+        pnt2 = np.max(rcrds,axis=0)
+        axes[2].plot([pnt1[0],pnt1[0]],[pnt1[1],pnt2[1]],lw=0.5,color="#8AFF30")
+        axes[2].plot([pnt2[0],pnt2[0]],[pnt1[1],pnt2[1]],lw=0.5,color="#8AFF30")
+        axes[2].plot([pnt1[0],pnt2[0]],[pnt1[1],pnt1[1]],lw=0.5,color="#8AFF30")
+        axes[2].plot([pnt1[0],pnt2[0]],[pnt2[1],pnt2[1]],lw=0.5,color="#8AFF30")
+
+        if score != "":
+            axes[2].text(0.53*np.shape(base_img)[1],1.07*np.shape(base_img)[0],"FOM: "+"{:8.5f}".format(float(score)),va='center',ha='left',fontsize=9)
+        
+        if iternum != "":
+            axes[2].text(0,1.07*np.shape(base_img)[0],"iteration: "+str(iternum),va='center',ha='left',fontsize=9)
+
+        plt.subplots_adjust(left=0.03, right=0.97, top=0.98, bottom=0.02)
+        fig.set_size_inches((6.5, 2.4), forward=True)
+
+        plt.savefig(savename,dpi=400)
+        plt.close()
+
+    def taxicab_ssim_objective(self,x):
+        """
+        Objective function used to quantify how well a given set of input imaging paramters, x, 
+        produce an image that can be arranged in such a way inside the experimental image that minimizes 
+        the custom taxicab_ssim objective function: 
+        
+            𝐽(𝜃)= 𝛼*d_TC(𝜃) + 𝛽*d_𝑆𝑆𝐼𝑀(𝜃)  
+    
+            - where d_TC(𝜃) is the taxicab distance required for optimal cross-correlation-based 
+              registration after upsampling (enforces consistency in the pattern across boundaries)
+
+            - where d_SSIM(𝜃) is the Structural Similarity Index Measure, which quantifies the visual 
+              similarity between the simulation and experiment patch (enforces visual consistency in 
+              the content within the patches)
+              
+        Args:
+            x: (np.array) set of parameters to test
+
+        Returns:
+            The objective function value (refered to as the the "figure-of-merit" value).
+        """
+        xfit = [a for a in x[:-2]] + [int(a) for a in x[-2::]]
+        try:
+            sim_img, exp_patch, shift_score, __ = self.fit(xfit, display=False);
+        except Exception as e: 
+            print(e)
+            sim_img = None
+        
+        if sim_img is not None:
+            match_ssim = iop.score_ssim(sim_img, exp_patch, win_size=35)
+            fom = 0.1*(shift_score)+match_ssim
         else:
             fom = 9999
-        print("🌀 FOM :",fom,"\n")
+        summary = self.sim_obj.simulation_summary(self.iter)
+        summary = summary + "\n       🌀 FOM                       :  {}\n".format(fom)
+        # Print for viewing progress
+        print(summary)
+        # Print to record progress to file
+        print(','.join(str(v) for v in [self.iter] + xfit + [fom]), file=open("progress.txt", "a"))
+        self.iter += 1
         return fom
 
-    def find_correspondence(self,objective='taxicab_vifp', optimizer='COBYLA', initial_solution="", constraint_list=[]):
+    def taxicab_ssim_objective_gb(self,x):
+        """
+        Objective function used to quantify how well a given set of input imaging paramters, x, 
+        produce an image that can be arranged in such a way inside the experimental image that minimizes 
+        the custom taxicab_ssim objective function: 
+        
+            𝐽(𝜃)= 𝛼*d_TC(𝜃) + 𝛽*d_𝑆𝑆𝐼𝑀(𝜃)  
+    
+            - where d_TC(𝜃) is the taxicab distance required for optimal cross-correlation-based 
+              registration after upsampling (enforces consistency in the pattern across boundaries)
 
-        def make_constraint_list(c):
-            constraints = []
-            for idx in range(len(c)):
-                constraints.append({'type': 'ineq', 'fun': lambda t, idx=idx: t[idx] - c[idx][0]})
-                constraints.append({'type': 'ineq', 'fun': lambda t, idx=idx: c[idx][1] - t[idx]})
-            return constraints
+            - where d_SSIM(𝜃) is the Structural Similarity Index Measure, which quantifies the visual 
+              similarity between the simulation and experiment patch (enforces visual consistency in 
+              the content within the patches)
+              
+        Uses special "fit_gb" which prioritizes seach closer to the center (horizontal) of the image.
 
-        if optimizer == 'COBYLA':
-            constraints = make_constraint_list(constraint_list)
-            print(constraints)
-            return minimize(self.taxicab_vifp_objective, initial_solution, method='COBYLA',tol=1E-6,options={'disp': True, 'rhobeg': 0.25, 'catol': 0.0002}, constraints=constraints)
+        Args:
+            x: (np.array) set of parameters to test
 
-        if optimizer == 'Powell':
-            return minimize(self.taxicab_vifp_objective, initial_solution, method='Powell',tol=1E-6,options={'disp': True})
+        Returns:
+            The objective function value (refered to as the the "figure-of-merit" value).
+        """
+        xfit = [a for a in x[:-2]] + [int(a) for a in x[-2::]]
+        try:
+            sim_img, exp_patch, shift_score, __ = self.fit_gb(xfit, display=False);
+        except Exception as e: 
+            print(e)
+            sim_img = None
+
+        if sim_img is not None:
+            match_ssim = iop.score_ssim(sim_img, exp_patch, win_size=35)
+            fom = 0.1*(shift_score)+match_ssim
+        else:
+            fom = 9999
+        summary = self.sim_obj.simulation_summary(self.iter)
+        summary = summary + "\n       🌀 FOM                       :  {}\n".format(fom)
+        # Print for viewing progress
+        print(summary)
+        # Print to record progress to file
+        print(','.join(str(v) for v in [self.iter] + xfit + [fom]), file=open("progress.txt", "a"))
+        self.iter += 1
+        return fom
+
+    def find_correspondence(self,objective='taxicab_ssim', optimizer='Powell', initial_solution="", search_mode="stm"):
+        """
+        Wrapper around scipy.optimize.minimize solvers, to find optimal correspondence between simulation and experiment 
+        by minimizing taxicab_ssim_objective.
+        
+        Args:
+            objective: (string) 
+            optimizer: (string) 
+            initial_solution: (np.array)
+            constraint_list: (list)
+            search_mode: (string) Specify search mode ('gb' for STEM grain boundaries, and 'stm' for STM images)
+            
+        Returns:
+        """
+        if os.path.isfile(os.getcwd()+"/progress.txt"):
+            proceed = ""
+            while str(proceed).upper() not in ["Y","N"]:
+                proceed = input("Append to existing progress file? [Y/N]: ")
+            if str(proceed).upper() == "N":
+                os.remove(os.getcwd()+"/progress.txt")
+            else:
+                pass
+        
+        self.iter = 1
+        # Keep this in because its useful for constraints that need to be enforced by the optimizer.
+        # Currently, constraints are enforced by a combination of clamping (in sim_params), or throwing exceptions in the 
+        # image simulation steps
+        constraints = []
+        # def make_constraint_list(c):
+        #    constraints = []
+        #    for idx in range(len(c)):
+        #        constraints.append({'type': 'ineq', 'fun': lambda t, idx=idx: t[idx] - c[idx][0]})
+        #        constraints.append({'type': 'ineq', 'fun': lambda t, idx=idx: c[idx][1] - t[idx]})
+        #    return constraints
+        print("Search mode: {}".format(search_mode))
+        if search_mode == 'stm':
+            if optimizer == 'COBYLA':
+                # constraints = make_constraint_list(constraint_list)
+                if objective  == "taxicab_ssim":
+                    return minimize(self.taxicab_ssim_objective, initial_solution, method='COBYLA',tol=1E-6,options={'disp': True, 'rhobeg': 0.25, 'catol': 0.01}, constraints=constraints)
+            
+            if optimizer == 'Powell':
+                if objective  == "taxicab_ssim":
+                    return minimize(self.taxicab_ssim_objective, initial_solution, method='Powell',tol=1E-6,options={'disp': True})
+
+        elif search_mode == 'gb':
+            if optimizer == 'COBYLA':
+                # constraints = make_constraint_list(constraint_list)
+                if objective  == "taxicab_ssim":
+                    return minimize(self.taxicab_ssim_objective_gb, initial_solution, method='COBYLA',tol=1E-6,options={'disp': True, 'rhobeg': 0.25, 'catol': 0.01}, constraints=constraints)
+            
+            if optimizer == 'Powell':
+                if objective  == "taxicab_ssim":
+                    return minimize(self.taxicab_ssim_objective_gb, initial_solution, method='Powell',tol=1E-6,options={'disp': True})
+
+        else:
+            print("Search mode {} not understood! Select either 'gb' for STEM grain boundaries, or 'stm' for STM images")

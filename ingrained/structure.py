@@ -1,43 +1,19 @@
-import os
-import cv2
-import sys
-import imutils
+import os,sys
+import shutil
+import random
 import subprocess
 import numpy as np
-import itertools as it
-from scipy.spatial import KDTree
-from scipy.spatial import Delaunay
-from scipy.spatial import distance
-
-import dm3_lib as dm3lib
 import matplotlib.pyplot as plt
+from scipy.spatial import distance, distance_matrix
 
-# You will need your own key!
-os.environ['MAPI_KEY'] = "¯\_(ツ)_/¯"
-# You will need your own key!
+import ingrained.image_ops as iop
+from ingrained.construct import TopGrain, BottomGrain
 
-from pymatgen import MPRester
-from pymatgen import Structure
-from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
+from ase import Atom
 from pymatgen.io.ase import AseAtomsAdaptor
-from pymatgen.io.vasp.inputs import Poscar, Structure, Lattice
-from pymatgen.io.xyz import XYZ
-
 from pymatgen.io.vasp.outputs import Chgcar
-
-# define Python user-defined exceptions
-class Error(Exception):
-   """Base class for other exceptions"""
-   pass
-class BorderValueError(Error):
-   """Raised when reduction of image border is negative or >45%"""
-   pass
-class PixelSizeError(Error):
-   """Raised when the input value is too large"""
-   pass
-class OSExecutableError(Error):
-   """Raised when the input value is too large"""
-   pass
+from pymatgen.io.vasp.inputs import Structure, Lattice
+from pymatgen.io.vasp import Poscar
 
 class cd:
     """Context manager for changing the current working directory"""
@@ -51,763 +27,936 @@ class cd:
     def __exit__(self, etype, value, traceback):
         os.chdir(self.savedPath)
 
-class Slab(object):                   
-    def __init__(self, chemical_formula, space_group, uvw_project, uvw_upward, tilt_angle, max_dimension): 
-        self.chemical_formula = chemical_formula
-        self.space_group = space_group
-        self.unit_cell = self._query_MP()
-        self.slab = self.construct_oriented_slab(uvw_project, uvw_upward, tilt_angle, max_dimension)
-        self.width_val, self.width_tol = self.get_repeat_dist(direction="width")
-        self.depth_val, self.depth_tol = self.get_repeat_dist(direction="depth")
-
-    def _query_MP(self):
+class PartialCharge(object):
+    """
+    This class contains the partial charge densities from a DFT-simulation
+    with a calculator to simulate a STM image and perform postprocessing manipulations.
+    """
+    def __init__(self, filename=""):
         """
-        Retrieve a conventional standard unit cell cif from MP
-
+        Initialize a PartialCharge object with the path to a PARCHG file.
+                 
         Args:
-            chemical_formula: A string of an element or compound "pretty formula"
-        Returns:
-            A pymatgen conventional standard unit cell
-        """
-        mpr = MPRester()
-        query = mpr.query(criteria={"pretty_formula": self.chemical_formula}, properties=["structure","icsd_ids"])
+            filename: (string) path to a PARCHG file
+        """  
+        self.filename = filename
+        self.parchg = Chgcar.from_file(filename) 
         
-        # First filter by space_group if provided 
-        if self.space_group:
-            query = [query[i] for i in range(len(query)) if SpacegroupAnalyzer(query[i]['structure']).get_space_group_symbol()==self.space_group]
-
-        # Select minimum volume:
-        selected = query[np.argmin([query[i]['structure'].lattice.volume for i in range(len(query))])]
-
-        pymatgen_structure = SpacegroupAnalyzer(selected["structure"]).get_conventional_standard_structure()
-        # pymatgen_structure.to(filename=self.chemical_formula+'_unit.POSCAR.vasp')
-        return pymatgen_structure
-
-    def _construct_slab(self,max_dimension):
-        """
-        Construct a supercell slab from a conventional standard unit cell
-        (i.e. a larger chunk of the material intended for further shaping or finishing)
-
-        Args:
-            pymatgen_structure: The input pymatgen conventional standard unit cell
-            max_dimension: A float representing the max edge length of the supercell
-        Returns:
-            A pymatgen supercell (max_dimension preserved when structure cubed after rotation)
-        """
-        # 
-        supercell = self.unit_cell.copy()
-
-        # Each row should correspond to a lattice vector.
-        lattice_matrix = self.unit_cell.lattice.matrix
-        bounding_box = np.vstack([lattice_matrix,np.matmul([[0,0,0],[1,1,0],[1,0,1],[0,1,1],[1,1,1]],lattice_matrix)])
-
-        # Starting edge length in Angstroms (cube)
-        a_start = 0.5
-        expansion_vector = np.array([1,1,1])
-        expansion_matrix = lattice_matrix
-        expand = np.sqrt(3)# [value_false, value_true][<test>] 
-
-        while a_start < (float(max_dimension)*expand)/2:
-
-            # Find lattice vector with minimum length   
-            _ , idx = KDTree(expansion_matrix).query([0,0,0])
-            
-            # Update expansion vector
-            expansion_vector[idx]+= 1
-            
-            # Update expansion matrix 
-            expansion_matrix = (lattice_matrix.T*expansion_vector).T
-
-            # Update bounding box
-            bounding_box = np.vstack([expansion_matrix,np.matmul([[0,0,0],[1,1,0],[1,0,1],[0,1,1],[1,1,1]],expansion_matrix)])
-
-            # Center bounding box to (0,0,0)
-            bounding_box = bounding_box - self._centroid_coordinates(bounding_box)
-
-            # Expand cube from center until penetrates bounding box
-            for a in np.arange(a_start,a_start+50,0.5):
-                sample = np.array(list(it.product((-a, a), (-a, a), (-a, a))))
-                inside =  all(self._in_hull(sample,bounding_box))
-                if not inside:
-                    a_start = a
-                    break
-
-        supercell.make_supercell(expansion_vector)
-        return supercell
-
-    def construct_oriented_slab(self,uvw_project,uvw_upward,tilt_angle,max_dimension):
-        """ 
-        Construct a slab, oriented for a specific direction of viewing, and slice into a cube
-
-        Args:
-            pymatgen_structure: The input pymatgen structure
-            uvw_project: The direction of projection (sceen to viewer) is a lattice vector ua + vb + wc.
-            uvw_upward: The upward direction is a lattice vector ua + vb + wc (must be normal to along_uvw).
-            tilt_ang: The CCW rotation around 'uvw_project' (applied after uvw_upward is set)
-            max_dimension: A float representing the max edge length of the supercell
-
-        Returns:
-            A pymatgen supercell (cube) oriented for a specific direction of viewing 
-        """
-        slab = self._construct_slab(max_dimension)
-
-        atomObj = AseAtomsAdaptor.get_atoms(slab)
-
-        # Make copy of atom object and get cell/projection vector info
-        atom  = atomObj.copy()
-
-        # Convert u,v,w vector to cartesian
-        along_xyz = np.matmul(np.array(atom.get_cell()).T,uvw_project)
-
-        # Rotate coordinates and cell so that 'along_xyz' is coincident with [0,0,1] 
-        atom.rotate(along_xyz,[0,0,1],rotate_cell=True)
-
-        # Convert u,v,w vector to cartesian
-        upwrd_xyz = np.matmul(np.array(atom.get_cell()).T,uvw_upward)
-
-        # Rotate coordinates and cell so that 'upwrd_xyz' is coincident with [0,1,0] 
-        atom.rotate(upwrd_xyz,[0,1,0],rotate_cell=True)
-
-        # Rotate coordinates along z to capture tilt angle
-        atom.rotate(tilt_angle,'z')
+        # Actual volumetric charge data from PARCHG 
+        self.chgdata = self.parchg.data['total'] 
         
-        bx_size = (max_dimension/2)
-
-        pos = atom.get_positions()
-        pos -= self._centroid_coordinates(atom.get_positions())    
-        atom.set_positions(pos) 
-
-        inidx = np.all(np.logical_and(pos>=[-bx_size,-bx_size,-bx_size],pos<=[bx_size,bx_size,bx_size]),axis=1)
-
-        if not np.sum(inidx)>0:
-            warnings.warn('Unit cell entirely outside bounding volume')
-          
-        del atom[np.logical_not(inidx)]
-
-        # Enforce (0,0,0) origin and reset cell around rotated/chiseled slab
-        pos = atom.get_positions()
-        pos -= np.min(atom.get_positions(),axis=0)
-        atom.set_positions(pos)
-        atom.set_cell(np.max(atom.get_positions(),axis=0) * np.identity(3))
-
-        return AseAtomsAdaptor.get_structure(atom)
-
-    def get_repeat_dist(self,direction="width",mode="tol"):
-        """
-        Find the approximate length needed for one full repeat of the structure along width or depth. 
-
+        # Structure associated w/ volumetric data
+        self.structure = self.parchg.structure     
+        
+        # Fraction of cell occupied by structure
+        self.zmax = self.structure.cart_coords[:, 2].max()/self.structure.lattice.c 
+        
+        # Get the real space sizes assocated with each voxel in volumetric data
+        self.lwh = ( self.structure.lattice.a/self.parchg.dim[0] , \
+                     self.structure.lattice.b/self.parchg.dim[1] , \
+                     self.structure.lattice.c/self.parchg.dim[2] )
+        
+        # Image fields
+        self.cell  = None
+        self.image = None
+        self.sim_params = None
+        
+    def _get_stm_vol(self, z_below="", z_above=""):
+        """        
+        Get the volumetric slab associated with the input depths.
+        
         Args:
-            pymatgen_structure: The input pymatgen structure
-            direction: The direction along which to find repeat length 
-                       (width = perp to uvw_project and uvw_upward, depth = along uvw_project)
-            mode: The decision used to accept the solution (tol = min tolerance, len = min length)
+            z_below: (float) thickness or depth from top in Angstroms
+            z_above: (float) distance above the surface to consider
 
         Returns:
-            A float representing the length needed for structure to repeat. 
+            A numpy array of the selected volumetric charge density slab.
+            Indice of the top slice (in reference to full slab)
         """
-        slab = AseAtomsAdaptor.get_atoms(self.slab)
-        positions_list = slab.get_positions()
-        chemical_symbols_list = slab.get_chemical_symbols()
-        chemical_symbols = list(set(chemical_symbols_list))
+        if self._parameter_check_z(z_below=z_below, z_above=z_above):
+            
+            # Get fractional coordinates for z_below and z_above
+            z_below /= self.structure.lattice.c
+            z_above /= self.structure.lattice.c
 
-        dtol = []
-        for element in chemical_symbols:
-            # Get all indices of 
-            indices = [int(i) for i, elem in enumerate(chemical_symbols_list) if element in elem]
-            position = np.array([positions_list[idx] for idx in indices])                     
-            for select_idx in range(np.shape(position)[0]):           
-                if direction == 'width':
-                    # Filter out atoms that have same a
-                    position_filt = np.array([a for a in position if a[0] != position[select_idx][0]])
-                    # Filter out atoms that are not at same width (has tolerance)
-                    position_filt = np.array([a for a in position_filt if np.abs(a[1] - position[select_idx][1]) < 1.0])
-                    # Filter out atoms that are not at same height (has tolerance)
-                    position_filt = np.array([a for a in position_filt if np.abs(a[2] - position[select_idx][2]) < 1.0])
-                    if position_filt != []:
-                        # Find index of closest_b (not in column)
-                        cb_idx = np.argmin(np.abs(position_filt[:,1]-position[select_idx][1]))
-                        # Compute "a" distance to closest proxy atom
-                        adis = np.round(np.abs(position[select_idx][0]-position_filt[cb_idx][0]),4)
-                        # Compute "b" tolerance to closest proxy atom
-                        btol = np.round(np.abs((position_filt[cb_idx][1]-position[select_idx][1])),4)
-                elif direction == 'depth': 
-                    # Filter out atoms that have same c
-                    position_filt = np.array([a for a in position if a[2] != position[select_idx][2]])
-                    # Filter out atoms that are not at same width (has tolerance)
-                    position_filt = np.array([a for a in position_filt if np.abs(a[1] - position[select_idx][1]) < 0.2])
-                    # Filter out atoms that are not at same height (has tolerance)
-                    position_filt = np.array([a for a in position_filt if np.abs(a[0] - position[select_idx][0]) < 0.2])
-                    if position_filt != []:
-                        # Find index of closest_b (not in column)
-                        cb_idx = np.argmin(np.abs(position_filt[:,1]-position[select_idx][1]))
-                        # Compute "a" distance to closest proxy atom
-                        adis = np.round(np.abs(position[select_idx][2]-position_filt[cb_idx][2]),4)
-                        # Compute "b" tolerance to closest proxy atom
-                        btol = np.round(np.abs((position_filt[cb_idx][1]-position[select_idx][1])),4)
-                try:
-                    if (adis,btol) not in dtol:
-                        dtol.append((adis,btol,element))
-                except:
-                    pass
+            # Get indices of volumetric slices to consider above and below the top surface (zmax)
+            nzmin = int(self.parchg.dim[2] * (self.zmax - z_below))
+            nzmax = int(self.parchg.dim[2] * (self.zmax + z_above))
 
-        if mode == "tol" :
-            elem_tols = []
-            for element in chemical_symbols:
-                dtol_elem = [a for a in dtol if a[2] == element]
-                min_tol = np.min(np.array([a[1] for a in dtol_elem]))
-                idx = np.argmin(np.array([a[0] for a in dtol_elem if a[1] == min_tol]))
-                elem_tols.append(dtol_elem[idx])
-
-        critical_idx = np.argmax(np.array([a[0] for a in elem_tols]))
-        return elem_tols[critical_idx][0:2]
-
-    def to_xyz(self,filename):
-        xyz = XYZ(self.slab)
-        xyz.write_file(filename=filename.split(".xyz")[0]+".xyz")
-
-    def to_vasp(self,filename):
-        self.unit_cell.to(filename=filename.split(".vasp")[0]+".POSCAR.vasp")
-
-    @staticmethod
-    def _in_hull(p, hull):
+            # Get volumetric slice (nzmin:nzmax,nrows,ncols) from charge data
+            rhos  = np.swapaxes(np.swapaxes(self.chgdata.copy(),0,2),1,2)[nzmin:nzmax,:,:]/self.structure.volume
+            return rhos, nzmax
+    
+    def _get_stm_cell(self, z_below="", z_above="", r_val="", r_tol=""):
         """
-        Test if points in `p` are in `hull`
+        Calculate a single STM image cell from DFT-simulation. 
+        
+        NOTE: Skew in the volumetric grid due to non-orthogonal lattice vectors 
+        in the imaging plane is NOT accounted for in the creation of the image_cell.
+        Use get_stm_image (wrapper) to return an image that contains the proper skew!
+        
+        Args:
+            z_below: (float) thickness or depth from top in Angstroms
+            z_above: (float) distance above the surface to consider
+            r_val: (float) isosurface charge density plane
+            r_tol: (float) tolerance to consider while determining isosurface
 
-        `p` should be a `NxK` coordinates of `N` points in `K` dimensions
-        `hull` is either a scipy.spatial.Delaunay object or the `MxK` array of the 
-        coordinates of `M` points in `K`dimensions for which Delaunay triangulation
-        will be computed
+        Returns:
+            A numpy array (np.float64) of the simulated image tile.
+            
+        Credit: Chaitanya Kolluru
         """
-        if not isinstance(hull,Delaunay):
-            hull = Delaunay(hull)
+        # Get volumetric slab corresponding to z_below and z_above parameters        
+        rhos, nzmax = self._get_stm_vol(z_below=z_below, z_above=z_above)
+            
+        if self._parameter_check_r(r_val=r_val, r_tol=r_tol, rhos=rhos):
+            
+            # If absdiff between charge density value and r_val not is not within r_tol, switch pixels to off (i.e. -9E9)
+            rhos[abs(rhos - r_val) >= r_tol] = -9E9
 
-        return hull.find_simplex(p)>=0
+            # Find all the pixel values for which entire charge density volume is swiched off
+            mask = np.sum(rhos,axis=0) == np.shape(rhos)[0]*-9E9
 
-    @staticmethod
-    def _centroid_coordinates(crds):
-        return np.sum(crds[:, 0])/crds.shape[0], np.sum(crds[:, 1])/crds.shape[0], np.sum(crds[:, 2])/crds.shape[0]
+            # Find all on pixels and flip bottom values to top
+            temp = (rhos.copy() > 0)[::-1,...]
 
-class TopGrain(Slab):
-    def __init__(self, chemical_formula, space_group, uvw_project, uvw_upward, tilt_angle, max_dimension, grain_height=""):
-        super().__init__(chemical_formula, space_group, uvw_project, uvw_upward, tilt_angle, max_dimension)
-        if grain_height == "":
-            self.height_val = max_dimension
+            # Create image by finding depth of first nonzero rhos pixel (argmax) and subtract from max-depth
+            image = ((nzmax-1)-np.argmax(temp,axis=0)).astype(np.float64)
+
+            # Fill in all 'off' pixels with min 'on' pixels value (minus 5) **** WHY IS THIS ???? ****
+            image[mask==True] = np.min(image[mask==False]) - 5
+
+            # Multiply indices by real-space height of volumetric slice
+            image *= self.lwh[2]
+
+            self.cell = image
+            return image
+    
+    def simulate_image(self, sim_params=[]):
+        """
+        Calculate a full displayable STM image from DFT-simulation.
+        
+        Args:
+            sim_params: (list) specifying the following simulation parameters
+              - z_below: (float) thickness or depth from top in (Å)
+              - z_above: (float) distance above the surface to consider (Å)
+              - r_val: (float) isosurface charge density plane
+              - r_tol: (float) tolerance to consider while determining isosurface
+              - x_shear: (float) fractional amt shear in x (+ to the right)
+              - y_shear: (float) fractional amt shear in y (+ up direction)
+              - x_stretch: (float) fractional amt stretch (+) or compression (-) in x
+              - y_stretch: (float) fractional amt stretch (+) or compression (-) in y
+              - rotation: (float) image rotation angle (in degrees) (+ is CCW)
+              - pix_size: (float) real-space pixel size (Å)
+              - sigma: (float) standard deviation for gaussian kernel used in postprocessing
+              - crop_height: (int) final (cropped) image height in pixels
+              - crop_width: (int) final (cropped) image width in pixels
+        
+        Returns:
+            A numpy array (np.float64) of the full simulated image. 
+        """
+        # Enforce max stretch/squeeze and max/min shear value (both directions 0.30)        
+        sim_params[4] = sorted((-0.50, sim_params[4], 0.50))[1]
+        sim_params[5] = sorted((-0.50, sim_params[5], 0.50))[1]
+        sim_params[6] = sorted((-0.50, sim_params[6], 0.50))[1]
+        sim_params[7] = sorted((-0.50, sim_params[7], 0.50))[1]        
+        
+        # Clamps the given pixel size to a range between 0.05 and 0.40 (Å)
+        sim_params[8] = sorted((-360, sim_params[8], 360))[1]
+
+        # Clamps the given pixel size to a range between 0.05 and 0.40 (Å)
+        sim_params[9] = sorted((0.05, sim_params[9], 0.40))[1]
+
+        # Clamps the given sigma value to a range between 0 and 10
+        sim_params[10] = sorted((0, sim_params[10], 10))[1]
+        # sim_params[10] = 0 # In case we want to get rid of blur completely
+
+        # Simulate the image cell
+        self._get_stm_cell(z_below=sim_params[0], z_above=sim_params[1], r_val=sim_params[2], r_tol=sim_params[3])
+
+        # Construct a larger cell by repeating image_cell in both directions, NREPS = 8
+        img_tiled = np.tile(self.cell,(16,16))
+        
+        # Add shear to account for a non-orthogonal unit cell (if necessary)
+        img_tiled = self._apply_lattice_shear(img_tiled)  
+
+        # Resize image based on pixel_size
+        img_tiled = iop.apply_resize(img_tiled, np.array([int(a) for a in np.shape(img_tiled) * np.array(self.lwh[::-1][1::]) * (1./sim_params[9])]))
+
+        # Rotate tiled image according to rotation value   
+        img_tiled = iop.apply_rotation(img_tiled, sim_params[8])
+
+        # Apply any specified postprocessing shear
+        img_tiled = iop.apply_shear(img_tiled, sim_params[4], sim_params[5])
+
+        # Apply any specified postprocessing strech/squeeze
+        img_tiled = iop.apply_stretch(img_tiled, sim_params[6], sim_params[7])
+
+        if self._image_size_check(img=img_tiled):
+
+            # Enforce odd sizes on width and length of cropped image (min_length = 25, max_length = current length)
+            sim_params[-1] = sorted((37,int(2 * np.floor(sim_params[-1]/2) + 1),int(2 * np.floor((np.shape(img_tiled)[1]-2)/2) + 1)))[1]
+            sim_params[-2] = sorted((37,int(2 * np.floor(sim_params[-2]/2) + 1),int(2 * np.floor((np.shape(img_tiled)[0]-2)/2) + 1)))[1]
+            
+            # Apply crop to image
+            img_tiled = iop.apply_crop(img_tiled,sim_params[-1],sim_params[-2])
+
+            # Apply gaussian blur
+            image = iop.apply_blur(img_tiled, sigma=sim_params[10])       
+
+            # If sucessful, record parameters!
+            self.sim_params = sim_params
+            self.image = image
+            return image
+    
+    
+    def simulate_image_random(self, rotation="", pix_size="", crop_height="", crop_width=""): 
+        """
+        Randomly simulate a valid image.
+        
+        Args:
+            rotation: (float) image rotation angle (in degrees CCW)
+            pix_size: (float) real-space edge length of a single pixel (in Å)
+            crop_height: (int) final (cropped) image height in pixels
+            crop_width: (int) final (cropped) image width in pixels
+        
+        Returns:
+            A numpy array (np.float64) of the full simulated image.
+        """
+        sim_params = self._random_initialize(rotation=rotation, pix_size=pix_size, crop_height=crop_height, crop_width=crop_width)
+        return self.simulate_image(sim_params)
+    
+    def _random_initialize(self, rotation="", pix_size="", crop_height="", crop_width=""):
+        """
+        Randomly select a set of parameters to simulate a valid image
+        
+        Args:
+            rotation: (float) image rotation angle (in degrees CCW)
+            pix_size: (float) real-space edge length of a single pixel (in Å)
+            crop_height: (int) final (cropped) image height in pixels
+            crop_width: (int) final (cropped) image width in pixels
+        
+        Returns:
+            A numpy array of sim_params (tuple) specifying the necessary simulation parameters for 'simulate_image'
+        """
+        slab_thickness = self.structure.cart_coords[:, 2].max() - self.structure.cart_coords[:, 2].min()
+        
+        z_below = random.uniform(-1+1E-10,(0.5*slab_thickness)-1E-10)
+        z_above = random.uniform(0,(1 - self.zmax) * self.structure.lattice.c)
+            
+        rhos, __ = self._get_stm_vol(z_below=z_below, z_above=z_above)
+        
+        r_val = random.uniform((rhos.max()/3)+1E-10, (rhos.max())-1E-10)
+        r_tol = random.uniform(0.0001+1E-10,(0.999*r_val)-1E-10)
+        
+        x_shear  = random.uniform(-0.3,0.3)
+        y_shear  = random.uniform(-0.3,0.3) 
+        x_stretch  = random.uniform(-0.3,0.3)
+        y_stretch  = random.uniform(-0.3,0.3)
+        
+        sigma = random.uniform(0,4)
+
+        if rotation != "":
+            rotation = (rotation + random.choice(list(range(-360,360,90))) + random.uniform(-2,2))%360
         else:
-            self.height_val = grain_height
-
-        self.structure = self.set_in_bicrystal(self.height_val,'top')
-
-    def set_in_bicrystal(self,height,set_in):
-        """
-        Given grains, find the proper width/depth dimensions
-
-        Args:
-            pymatgen_structure: The input pymatgen grain structure 
-            width: The width of the bicrystal supercell to set grain in 
-            height: The height of the bicrystal supercell to set grain in 
-            depth: The depth of the bicrystal supercell to set grain in 
-            set_in: The position (top/bottom) to set grain in bicrystal supercell 
-
-        Returns:
-            A pymatgen grain structure set into a bicrystal supercell
-        """
-        atomObj = AseAtomsAdaptor.get_atoms(self.slab)
-
-        width, depth = self.width_val, self.depth_val
-
-        chiseled = atomObj.copy()
-        pos = chiseled.get_positions()
-        pos -= np.min(pos,axis=0)   
-        chiseled.set_positions(pos) 
-        inidx = np.all(np.logical_and(pos>=[0,0,0],pos<[width,height,depth]),axis=1)
-        
-        del pos
-        del chiseled[np.logical_not(inidx)]
-
-        if set_in == 'top':
-            pos = chiseled.get_positions()
-            pos[:,1] = pos[:,1]+height
-            chiseled.set_positions(pos) 
+            rotation = random.choice(list(range(-360,360,1)))
             
-        chiseled.set_cell([width,2*height,depth]) 
-
-        # return chiseled
-        return AseAtomsAdaptor.get_structure(chiseled)
-
-    def to_vasp(self,filename):
-        self.structure.to(filename=filename.split(".vasp")[0]+".POSCAR.vasp")
-
-class BottomGrain(Slab):
-    def __init__(self, chemical_formula, space_group, uvw_project, uvw_upward, tilt_angle, max_dimension, grain_height=""):
-        super().__init__(chemical_formula, space_group, uvw_project, uvw_upward, tilt_angle, max_dimension)
-        if grain_height == "":
-            self.height_val = max_dimension
+        if pix_size != "":
+            pix_size = pix_size + random.uniform(-0.015,0.015)
         else:
-            self.height_val = grain_height
-
-        self.structure = self.set_in_bicrystal(self.height_val,'bottom')
-
-    def set_in_bicrystal(self,height,set_in):
+            pix_size = random.uniform(0.05,0.40)
+            
+        if crop_width == "":
+            crop_height = crop_width = int(2 * np.floor(random.uniform(33,121)/2) + 1)    
+        return [z_below, z_above, r_val, r_tol, x_shear, y_shear, x_stretch, y_stretch, rotation, pix_size, sigma, crop_height, crop_width]
+    
+    def _image_size_check(self, img):
         """
-        Given grains, find the proper width/depth dimensions
+        """
+        nrow, ncol = np.shape(img)
+        if nrow > 35 and ncol > 35:
+            pass
+        else:
+            raise Exception("ImageSizeError: {0} does not meet the minimum (37, 37) size requirement".format(np.shape(img)))
+        return True
+
+    def _parameter_check_z(self, z_below="", z_above=""):
+        """
+        Validate choice of depth parameters to ensure feasibility of STM image calculation
+        
+        Args:
+            z_below: (float) thickness or depth from top in Angstroms
+            z_above: (float) distance above the surface to consider
+            
+        Returns:
+            A boolean (pass or fail)
+        """
+        slab_thickness = self.structure.cart_coords[:, 2].max() - self.structure.cart_coords[:, 2].min()
+
+        # Check to make sure zbelow is within valid depth range (in Angstroms)
+        if -1 <= z_below <= min([0.5*slab_thickness,4]):
+            pass
+        else:
+            raise Exception("ParameterError: z_below = {0} outside valid range [{1} to {2:.5}]".format(z_below,-1,min([0.5*slab_thickness,4])))
+                
+        # Check to make sure z_above is within bounds of structure (within close proximity to surface, specifically)
+        if 0 < z_above <= ((1 - self.zmax) * 0.5 * self.structure.lattice.c):
+            pass
+        else:
+            raise Exception("ParameterError: z_above = {0} outside structure (must be <= {1:.5})".format(z_above,((1 - self.zmax) * 0.5 * self.structure.lattice.c)))
+        return True
+    
+    def _parameter_check_r(self, r_val="", r_tol="", rhos=""):
+        """
+        Validate choice of charge density parameters to ensure feasibility of STM image calculation
+        
+        Args:
+            r_val: (float) isosurface charge density plane
+            r_tol: (float) tolerance to consider while determining isosurface
+            rhos: (numpy array) the volumetric charge density slab
+            
+        Returns:
+            A boolean (pass or fail) 
+        """
+        # Check to make sure r_val is within valid isosurface (rmax/3 to rmax)
+        if rhos.max()/3 < r_val <  rhos.max():
+            pass
+        else:
+            raise Exception("ParameterError: r_val = {0} outside valid range ({1:.5} to {2:.5})".format(r_val,rhos.max()/3,rhos.max()))
+
+        # Check to make sure r_tol is within proper tolerance (0.0001 to 0.999*r_val)
+        if 0.0001 < r_tol <  0.999*r_val:
+            pass
+        else:
+            raise Exception("ParameterError: r_tol = {0} outside valid range ({1:.5} to {2:.5})".format(r_tol,0.0001,0.999*r_val))
+        return True
+        
+    def _apply_lattice_shear(self, img):
+        """
+        Apply centered shear of volumetric grid along lattice vectors. 
 
         Args:
-            pymatgen_structure: The input pymatgen grain structure 
-            width: The width of the bicrystal supercell to set grain in 
-            height: The height of the bicrystal supercell to set grain in 
-            depth: The depth of the bicrystal supercell to set grain in 
-            set_in: The position (top/bottom) to set grain in bicrystal supercell 
-
-        Returns:
-            A pymatgen grain structure set into a bicrystal supercell
-        """
-        atomObj = AseAtomsAdaptor.get_atoms(self.slab)
-
-        width, depth = self.width_val, self.depth_val
-
-        chiseled = atomObj.copy()
-        pos = chiseled.get_positions()
-        pos -= np.min(pos,axis=0)   
-        chiseled.set_positions(pos) 
-        inidx = np.all(np.logical_and(pos>=[0,0,0],pos<[width,height,depth]),axis=1)
-        
-        del pos
-        del chiseled[np.logical_not(inidx)]
-
-        if set_in == 'top':
-            pos = chiseled.get_positions()
-            pos[:,1] = pos[:,1]+height
-            chiseled.set_positions(pos) 
+            img: (numpy array) 
             
-        chiseled.set_cell([width,2*height,depth]) 
-
-        # return chiseled
-        return AseAtomsAdaptor.get_structure(chiseled)
-
-    def to_vasp(self,filename):
-        self.structure.to(filename=filename.split(".vasp")[0]+".POSCAR.vasp")
+        Returns:
+            A square numpy array (np.float64) of the sheared image.
+             
+        NOTE: This function has limited use cases. Add more for robust handling! Currently assumes "a" 
+              lattice vector in x-direction and "b" lattice vector resolves into x and y components. 
+        """
+        # Get lattice vector a and b
+        lva, lvb = self.parchg.structure.lattice.matrix[0], self.parchg.structure.lattice.matrix[1]
+        
+        # Use count of nonzero entries as method to detect vectors resolved along multiple directions
+        if np.count_nonzero(lvb) == 1 and np.count_nonzero(lva) == 1:
+            x_sh = 0
+            y_sh = 0
+        elif np.count_nonzero(lvb) == 2 and np.count_nonzero(lva) == 1:
+            x_sh = -lvb[0]/np.linalg.norm(lva) # Shear b vector in the x direction
+            y_sh = 0
+        else:
+            raise Exception('Shear detected, but not accounted for in image formed from volumetric grid!')
+        return iop.apply_shear(img, x_sh, y_sh)  
+    
+    def simulation_summary(self, iter="", verbose=False):
+        """
+        Write the parameter summary to screen (or filename).
+        
+        Args:
+            filename: (string) name of the write file
+            
+        Returns:
+            None
+        """
+        # Unpack parameters specific to simulation
+        z_below, z_above, r_val, r_tol, x_shear, y_shear, x_stretch, y_stretch, rotation, pix_size, sigma, crop_height, crop_width = self.sim_params
+        summary = """Iteration {0}:
+        • (z_below, z_above) (Å)    :  {1}
+        • (r_val, r_tol)            :  {2}
+        • (x, y) shear (frac)       :  {3}
+        • (x, y) stretch (frac)     :  {4}
+        • sigma  (Gaussian blur)    :  {5}  
+        • rotation (deg CCW)        :  {6}
+        • pix_size (Å)              :  {7}
+        • img_size (pixels)         :  {8}""".format(iter,(z_below, z_above),(r_val, r_tol),(x_shear, y_shear),(x_stretch, y_stretch),sigma,rotation,pix_size,(crop_height,crop_width))
+        if verbose:
+            print(summary)
+        else:
+            return summary
+                
+    def display(self):
+        """
+        Display the simulated STM image.
+        """
+        plt.imshow(iop.scale_pixels(self.image,mode='grayscale'),cmap='hot')
+        plt.axis('off')
+        plt.show()
 
 class Bicrystal(object):
-    def __init__(self, structure="", minmax_width="", minmax_depth=""):
-        if isinstance(structure,list):
-            grain_1, grain_2 = structure
-            self.top_grain = TopGrain(grain_1['chemical_formula'],grain_1['space_group'],\
-                                      grain_1['uvw_project'], grain_1['uvw_upward'],\
-                                      grain_1['tilt_angle'],  grain_1['max_dimension'])
-            self.bot_grain = BottomGrain(grain_2['chemical_formula'],grain_2['space_group'],\
-                                      grain_2['uvw_project'], grain_2['uvw_upward'],\
-                                      grain_2['tilt_angle'],  grain_2['max_dimension'])
-            self.top_grain.strain, self.bot_grain.strain = self._strain_to_coincidence(minmax_width=minmax_width,minmax_depth=minmax_depth)
-            self.structure = self._fuse_grains()
-            self.haadf_image = None
-            self.haadf_pixel = None
+    """
+    This class contains two oriented supercell slabs prepared from structure queries to the Materials Project, 
+    as well as a calculator to fuse the slabs together into a bicrystal, simulate a convolution HAADF STEM image, 
+    and perform postprocessing imaging manipulations.
+    """
+    def __init__(self, filename="", write_poscar=False):
+        """
+        Initialize a Bicrystal object with the path to a bicrystal slabs (json) file.
+                 
+        Args:
+            filename: (string) path to a bicrystal slabs file
+        """  
+        self.filename = filename
+        slab = iop.open_construction_file(filename)
+
+        self.slab_1 = slab["slab_1"]
+        self.slab_2 = slab["slab_2"]
+        
+        # Copy simulation folder from install directory to cwd
+        try:
+            shutil.copytree(os.path.dirname(__file__)+'/simulation', os.getcwd()+'/simulation')
+        except:
+            pass
+
+        # Read constraints on dimensions for combined structure
+        constraints = slab["constraints"]
+
+        if "structure_file" not in slab:
+            # Actual structure for the top grain (slab positioned into top of bicrystal cell)
+            top_grain = TopGrain(self.slab_1["chemical_formula"], self.slab_1["space_group"],\
+                                 self.slab_1['uvw_project'], self.slab_1['uvw_upward'],\
+                                 self.slab_1['tilt_angle'], self.slab_1['max_dimension'],\
+                                 self.slab_1['flip_species'])
+            
+            # Actual structure for the bottom grain (slab positioned into bottom of bicrystal cell)
+            bot_grain = BottomGrain(self.slab_2["chemical_formula"], self.slab_2["space_group"],\
+                                 self.slab_2['uvw_project'], self.slab_2['uvw_upward'],\
+                                 self.slab_2['tilt_angle'], self.slab_2['max_dimension'],\
+                                 self.slab_2['flip_species'])         
+        
+            structure, top_grain_fit, bot_grain_fit, strain_info = self._get_base_structure(top_grain, bot_grain, constraints)
+            
+            self.top_grain = top_grain_fit
+            self.bot_grain = bot_grain_fit
+            self.structure = structure
+
         else:
-            self.top_grain = None 
-            self.bot_grain = None
-            self.structure = Poscar.from_file(structure).structure
-            self.haadf_image = None
-            self.haadf_pixel = None
+            poscar = Poscar.from_file(slab["structure_file"])
+            self.structure = poscar.structure
 
-    def _strain_to_coincidence(self, minmax_width="", minmax_depth=""):
+        # Image fields
+        if constraints['pixel_size'] != "":
+            self.pix_size = constraints['pixel_size'] 
+        else:
+            self.pix_size = None
+
+        self.cell  = self._get_image_cell()
+        self.image = None
+        self.sim_params = None
+        
+        self.lw = (self.structure.lattice.b/np.shape(self.cell)[1],
+                   self.structure.lattice.c/np.shape(self.cell)[0])
+
+        if write_poscar:
+            self.write_poscar(strain_info=strain_info)
+
+    def _get_base_structure(self, top_grain_structure, bot_grain_structure, constraints):
         """
-        Take the current grain templates, expand in width/depth to minimize strain 
-        between grains and assign same width/depth computed as the average of the 
-        ideal expansion values. 
-
+        Take grains and fuse them into a simple bicrystal, subject to input constraints
+        
+        Args:
+            top_grain_structure (): an ingrained.contruct.TopGrain() object
+            bot_grain_structure (): an ingrained.contruct.BottomGrain() object
+            constraints (dict): dictionary of geometric constraints for bicrystal construction
+        
         Returns:
-            Tuples of (width,depth) strain values for top and bottom (+ updates grain.structures)
+            The basic fused bicrystal (pymatgen structure) w/ corresponding ingrained.contruct.TopGrain() 
+            and ingrained.contruct.BottomGrain() objects after average expand/contract values applied
         """
-        grain_1_width = self.top_grain.width_val
-        grain_1_depth = self.top_grain.depth_val
+        structure, top_grain, bot_grain, strain_info= self._fuse_grains(top_grain_structure, bot_grain_structure, constraints)
+        structure = self._adjust_interface_width(structure=structure, interface_width_1=constraints['interface_1_width'], interface_width_2=constraints['interface_2_width'])
+        structure = self._remove_interface_collisions(structure=structure, collision_removal_1=constraints['collision_removal'][0], collision_removal_2=constraints['collision_removal'][1])
+    
+        return structure, top_grain, bot_grain, strain_info
+    
+    def _fuse_grains(self, top_grain_structure, bot_grain_structure, constraints):
+        """
+        Take current grain structures and expand/contract in width/depth to minimize strain 
+        between grains and assign same width/depth computed as the average of the ideal 
+        expand/contract values for each grain. 
 
-        grain_2_width = self.bot_grain.width_val
-        grain_2_depth = self.bot_grain.depth_val
+        Args:
+            top_grain_structure (): an ingrained.contruct.TopGrain() object
+            bot_grain_structure (): an ingrained.contruct.BottomGrain() object
+            constraints (dict): dictionary of geometric constraints for bicrystal construction
+            
+        Return:
+            A bicrystal (pymatgen structure) from fusion of top and bottom grains
+        """
+        # Find integer expansions that minimize strain between lattices
+        top_n_width, bot_n_width, tol_width = self._find_optimal_expansion(top_grain_structure.width, bot_grain_structure.width, \
+                                                                      min_len=constraints['min_width'], max_len=constraints['max_width'])
+        top_n_depth, bot_n_depth, tol_depth = self._find_optimal_expansion(top_grain_structure.depth, bot_grain_structure.depth, \
+                                                                      min_len=constraints['min_depth'], max_len=constraints['max_depth'])
 
-        if not minmax_width:
-            # The bicrystal cannot be any smaller in width than than the min width of either constituent grain
-            min_width = min([grain_1_width,grain_2_width])
-            # The bicrystal cannot be any larger in width than 1.1 x the height of a single grain
-            max_width = self.top_grain.height_val*1.1
-            minmax_width = (min_width,max_width)
+        # Apply appropriate integer expansions to grain structures
+        top_grain_structure.structure.make_supercell([top_n_width,1,top_n_depth])
+        bot_grain_structure.structure.make_supercell([bot_n_width,1,bot_n_depth])
+        
+        # Get expanded width/depth values of the grains 
+        widths = [top_grain_structure.structure.lattice.a,bot_grain_structure.structure.lattice.a]
+        depths = [top_grain_structure.structure.lattice.c,bot_grain_structure.structure.lattice.c]
 
-        if not minmax_depth:
-            # The bicrystal cannot be any smaller in depth than the min depth of either constituent grain
-            min_depth = min([grain_1_depth,grain_2_depth])
-            # The bicrystal cannot be any larger in depth than 3 x max depth of either constituent grain
-            max_depth = 3*max([grain_1_depth,grain_2_depth])
-            minmax_depth = (min_depth,max_depth)
-
-        top_width, bot_width, tol_width = self._find_approx_lcm(grain_1_width,grain_2_width,min_len=minmax_width[0],max_len=minmax_width[1])
-        top_depth, bot_depth, tol_depth = self._find_approx_lcm(grain_1_depth,grain_2_depth,min_len=minmax_depth[0],max_len=minmax_depth[1])
-
-        top_expansion = [int(top_width/grain_1_width),1,int(top_depth/grain_1_depth)]
-        bot_expansion = [int(bot_width/grain_2_width),1,int(bot_depth/grain_2_depth)]
-
-        self.top_grain.structure.make_supercell(top_expansion)
-        self.bot_grain.structure.make_supercell(bot_expansion)
-
-        widths = [self.top_grain.structure.lattice.abc[0],self.bot_grain.structure.lattice.abc[0]]
-        depths = [self.top_grain.structure.lattice.abc[2],self.bot_grain.structure.lattice.abc[2]]
-
-        # Average for top/bottom widths and depths
-        avg_width = np.mean(widths)
-        avg_depth = np.mean(depths)
+        # Use "average" width/depth of grains for bicrystal dimensions
+        width_bc  = np.mean(widths)
+        depth_bc  = np.mean(depths)
+        height_bc = top_grain_structure.height * 2
 
         # Details on tension/compression
-        strain_top_width = ((avg_width-widths[0])/widths[0])*100
-        strain_bot_width = ((avg_width-widths[1])/widths[1])*100
-        strain_top_depth = ((avg_depth-depths[0])/depths[0])*100
-        strain_bot_depth = ((avg_depth-depths[1])/depths[1])*100
+        strain_top_width = ((width_bc-widths[0])/widths[0])*100
+        strain_bot_width = ((width_bc-widths[1])/widths[1])*100
+        strain_top_depth = ((depth_bc-depths[0])/depths[0])*100
+        strain_bot_depth = ((depth_bc-depths[1])/depths[1])*100
 
-        # print("\n")
-        # print("-"*36)
-        # print("Strain in top grain (%): ")
-        # print("  >> width : ",strain_top_width)
-        # print("  >> depth : ",strain_top_depth)
-        # print("Strain in bottom grain (%): ")
-        # print("  >> width : ",strain_bot_width)
-        # print("  >> depth : ",strain_bot_depth)
-        # print("-"*36)
-        # print("\n")
+        # Get ASE Atoms object from pymatgen structures
+        top_grain = AseAtomsAdaptor.get_atoms(top_grain_structure.structure)
+        bot_grain = AseAtomsAdaptor.get_atoms(bot_grain_structure.structure)
 
-        # Expand/contract each grain to coincidence in 'a' and 'c' direction
-        # Note: ASE has nice functionality here - not sure if pymatgen has same function?
-        top_grain = AseAtomsAdaptor.get_atoms(self.top_grain.structure)
-        bot_grain = AseAtomsAdaptor.get_atoms(self.bot_grain.structure)
+        # Strain to coincidence
+        top_grain.set_cell([width_bc,height_bc,depth_bc],scale_atoms=True) 
+        bot_grain.set_cell([width_bc,height_bc,depth_bc],scale_atoms=True)
+
+        # Set bottom grain as the gb structure 
+        gb_full = bot_grain.copy()
         
-        top_grain.set_cell([np.mean(widths),self.top_grain.height_val*2,np.mean(depths)],scale_atoms=True) 
-        bot_grain.set_cell([np.mean(widths),self.top_grain.height_val*2,np.mean(depths)],scale_atoms=True) 
+        # Get chemical symbols and positions for top grain
+        top_grain_sym = top_grain.get_chemical_symbols()
+        top_grain_pos = top_grain.get_positions()
+            
+        # Insert top_grain info into gb structure (on top of the exisiting 'bottom' structure)    
+        for i in range(len(top_grain_sym)):
+            gb_full.append(Atom(top_grain_sym[i],top_grain_pos[i]))
 
-        self.top_grain.structure = AseAtomsAdaptor.get_structure(top_grain)
-        self.bot_grain.structure = AseAtomsAdaptor.get_structure(bot_grain)
-
-        return (strain_top_width,strain_top_depth), (strain_bot_width,strain_bot_depth)
-
-    def _fuse_grains(self):
+        # Get positions, cell information and shuffle axes
+        gb_pos = gb_full.get_positions()
+        gb_abc = gb_full.get_cell_lengths_and_angles()[0:3]
+        gb_full.set_positions(np.vstack([np.vstack([gb_pos[:,2],gb_pos[:,0]]),gb_pos[:,1]]).T) 
+        gb_full.set_cell([gb_abc[2],gb_abc[0],gb_abc[1]])
+        
+        # Convert back to pymatgen structure and resolve any boundary conflicts
+        gb_full_structure = AseAtomsAdaptor.get_structure(gb_full)
+        gb_full_structure = self._enforce_pb(gb_full_structure)
+        gb_full_structure = self._resolve_pb_conflicts(gb_full_structure)
+        return gb_full_structure, top_grain_structure, bot_grain_structure, [strain_top_width,strain_top_depth,strain_bot_width,strain_bot_depth]
+    
+    def _adjust_interface_width(self, structure="", interface_width_1=0, interface_width_2=0):
         """
-        Combine two bicrystal supercell into a single bicrystal supercell
+        Adjust spacing between both interfaces between grains, with option to remove collision conflicts
 
         Args:
-            pymatgen_structure_1: The input top bicrystal pymatgen structure
-            pymatgen_structure_2: The input bot bicrystal pymatgen structure
+            structure (pymatgen structure): bicrystal structure
+            interface_width_1: (float) spacing b/w max pos of bottom grain and min pos of top grain (Å)
+            interface_width_2: (float) spacing b/w max pos of top grain and min pos of bottom grain (Å)
+
+        Return:
+            A bicrystal (pymatgen structure) that reflects specified interface widths
+        """   
+        # Get copy of current structure  
+        bc = structure.copy()   
+        if interface_width_1 != 0:
+            # Update atom coordinate positions based on modified length in the c-direction from interface_width_1
+            new_crds, new_spec = [], []
+            for idx in range(len(bc)):
+                cx,cy,cz = bc.cart_coords[idx]
+                if bc.cart_coords[idx][2] >= bc.lattice.c/2:
+                    new_crds.append([cx/bc.lattice.a,cy/bc.lattice.b,(cz+interface_width_1)/(bc.lattice.c+interface_width_1)])
+                else:
+                    new_crds.append([cx/bc.lattice.a,cy/bc.lattice.b,cz/(bc.lattice.c+interface_width_1)])
+                new_spec.append(str(bc.species[idx]).split('Element')[0])
+            
+            # Create new 'Lattice' from parameters and a new pymatgen 'Structure' with updated positions
+            lattice = Lattice.from_parameters(a=bc.lattice.a, b=bc.lattice.b, c=(bc.lattice.c+interface_width_1), alpha=90, beta=90, gamma=90)
+            new_struct_1 = Structure(lattice, new_spec, new_crds)
+
+            # Get copy of current structure with atom positions
+            bc = new_struct_1.copy()
+        
+        if interface_width_2 != 0:
+            crds = bc.cart_coords
+            # Shift all coords up half distance of interface_width_2
+            crds[:,2] = (crds[:,2]-np.min(crds[:,2])) + interface_width_2/2
+                    
+            # Update atom coordinate positions based on modified length in the c-direction from interface_width_2
+            new_crds, new_spec = [], []
+            for idx in range(len(bc)):
+                cx,cy,cz = crds[idx]
+                new_crds.append([cx/bc.lattice.a,cy/bc.lattice.b,cz/(np.max(crds[:,2]) + interface_width_2/2)])
+                new_spec.append(str(bc.species[idx]).split('Element')[0])
+            
+            # Create new 'Lattice' from parameters and a new pymatgen 'Structure' with updated positions
+            lattice = Lattice.from_parameters(a=bc.lattice.a, b=bc.lattice.b, c=(np.max(crds[:,2]) + interface_width_2/2), alpha=90, beta=90, gamma=90)
+            new_struct_2 = Structure(lattice, new_spec, new_crds)
+        
+            # Get copy of current structure with atom positions
+            bc = new_struct_2.copy()
+
+        return bc      
+            
+    def _remove_interface_collisions(self, structure="", collision_removal_1=False, collision_removal_2=False, collision_distance=1):
+        """
+        Remove atoms at the interface that are within 'collision_distance' of another atom,
+        starting removal with atoms at the bottom of the interface region
+        
+        Args:
+            structure (pymatgen structure): bicrystal structure
+            collision_removal_1 (boolean): remove atoms within 'collision_distance' in volume around interface_1
+            collision_removal_2 (boolean): remove atoms within 'collision_distance' in volume around interface_2
+            collision_distance (float): atoms less than or equal to this distance are considered collisions
+        
+        Return:
+            A bicrystal (pymatgen structure) with collisions removed within the interface volumes
+        """
+        # Get copy of current structure
+        bc = structure.copy()
+        
+        # Interface 1 collision removal
+        if collision_removal_1:
+            
+            # Get all atomic coordinates
+            pos = bc.cart_coords
+            
+            # Define region surrounding interface where we check for conflict (3Å region)
+            iw_zone = ((bc.lattice.c/2)-1.5,(bc.lattice.c/2)+1.5)
+            
+            # Retrieve all coordinates belonging to the iw_zone
+            interface_coords = pos[np.where((pos[:,2]>=iw_zone[0]) & (pos[:,2]<=iw_zone[1]))]
+            
+            # Ensure they are sorted such that lower coordinates are tested first
+            interface_coords = interface_coords[interface_coords[:,2].argsort()]
+            
+            for coord in interface_coords:
+                # Get array of distances between coord and coords of current structure
+                dist_check = distance_matrix([coord], bc.cart_coords)[0]
+                
+                # If an atom is within collision_distance, remove!
+                if np.sum(dist_check <= collision_distance) > 1:
+                    indx = list(dist_check).index(0)
+                    bc.remove_sites([indx])    
+            
+        # Interface 2 collision removal
+        if collision_removal_2:
+            
+            # Get all atomic coordinates
+            pos = bc.cart_coords
+            
+            # Define region surrounding interface where we check for conflict (3Å region)
+            iw_zone = (0,1.5)
+            
+            # Retrieve all coordinates belonging to the iw_zone
+            interface_coords = pos[np.where((pos[:,2]>=iw_zone[0]) & (pos[:,2]<=iw_zone[1]))]
+            
+            # Ensure they are sorted such that lower coordinates are tested first
+            interface_coords = interface_coords[interface_coords[:,2].argsort()]
+            
+            for coord in interface_coords:
+                # Move coordinate across PBC to check for conflict
+                coord[2] = coord[2]+bc.lattice.c
+                
+                # Get array of distances between coord and coords of current structure
+                dist_check = distance_matrix([coord], bc.cart_coords)[0]
+                
+                # If an atom is within collision_distance, remove!
+                if np.sum(dist_check <= collision_distance) > 1:
+                    indx = list(dist_check).index(0)
+                    bc.remove_sites([indx])  
+        return bc
+    
+    def _get_image_cell(self, defocus=1, interface_width=0, pix_size=0.15, view=False):       
+        """
+        Calculate a single HAADF STEM image cell from bicrystal structure. 
+    
+        Args:
+            defocus: (float) controls degree to which edges blur in microscopy image (Å)
+            interface_width: (float) spacing b/w max pos of bottom_grain and min pos of top grain (Å)
+            pix_size: (float) real-space pixel size (Å)
+            view: (boolean) option to display cell after simulation 
 
         Returns:
-            Tuples of top/bot widths and depths as floats
+            A numpy array (np.float64) of the simulated image tile.
         """
-        top_grain = AseAtomsAdaptor.get_atoms(self.top_grain.structure)
-        bot_grain = AseAtomsAdaptor.get_atoms(self.bot_grain.structure)
-
-        top = top_grain.copy()
-        bot = bot_grain.copy()
-
-        chem_sym_list = top.get_chemical_symbols()
-
-        j=0
-        for top_crds in top.get_positions():
-            bot.append(Atom(chem_sym_list[j],top_crds))
-            j+=1
-
-        gb_pos = bot.get_positions()
-        gb_cel = bot.get_cell_lengths_and_angles()[0:3]
-        accepted_pos = np.vstack([np.vstack([gb_pos[:,2],gb_pos[:,0]]),gb_pos[:,1]]).T
-
-        bot.set_positions(accepted_pos) 
-        bot.set_cell([gb_cel[2],gb_cel[0],gb_cel[1]])
-       
-        return AseAtomsAdaptor.get_structure(bot)
-
-    def _adjust_interface_width(self,width):
-
-        if width == 0:
-            return self.structure.copy()
-
-        bc = self.structure.copy()
- 
-        newa = bc.lattice.a
-        newb = bc.lattice.b
-        newc = bc.lattice.c+width
-
-        new_crds = []
-        new_spec = []
-        for idx in range(len(bc)):
-            cx,cy,cz = bc.cart_coords[idx]
-            if bc.cart_coords[idx][2] >= bc.lattice.c/2:
-                new_crds.append([cx/newa,cy/newb,(cz+(1.5*width))/newc])
-            else:
-                new_crds.append([cx/newa,cy/newb,(cz+(0.5*width))/newc])
-            
-            new_spec.append(str(bc.species[idx]).split('Element')[0])
+        # Get copy of current structure
+        bc =self.structure.copy() 
         
-        lattice = Lattice.from_parameters(a=newa, b=newb, c=newc, alpha=90, beta=90, gamma=90)
-        return Structure(lattice, new_spec, new_crds)
-
-    def convolution_HAADF(self, filename="", dm3="", pixel_size="", interface_width=0, defocus=1.0, border_reduce=(0,0)):
-        """
-        filename: A string representing the file name. The filename must include image format like .jpg, .png,
-
-        """
-        try: 
-            if(border_reduce[0] >= 0.20 or border_reduce[0] < 0 or \
-               border_reduce[1] >= 0.25 or border_reduce[1] < 0):
-                raise BorderValueError
-
-            if not isinstance(pixel_size,str):
-                if pixel_size >= 0.8 or pixel_size<0.005:
-                    raise PixelSizeError
-
-            if sys.platform == 'darwin':
-                opsys = 'mac'
-            elif sys.platform == 'linux':
-                opsys = 'linux'
-            else:
-                raise OSExecutableError
-
-        except BorderValueError:
-            print("Error: Unstable border reduction!")
-            return None
-        except PixelSizeError:
-            print("Error: Image pixel size (height/width) must be nonegative and < 0.8 Å!")
-            return None
-        except OSExecutableError:
-            print("Error: 'incostem' incompatible with {} operating system!".format(sys.platform))
-            return None
-
-        bc = self._adjust_interface_width(interface_width)
-
-        # Get cell parameters 
-        atomcel = bc.lattice.abc
-
-        # Get atom positions 
-        atompos = bc.cart_coords
-
-        # Set pixel size automatically if not provided
-        if not pixel_size:
-            dm3fObj = dm3lib.DM3(dm3)
-            if dm3fObj.pxsize[1].decode('UTF-8') == 'nm':
-                pixel_size = dm3fObj.pxsize[0]*10
-            else:
-                print("Imaging unit unrecognized! Default 'pixel_size=0.15' in angstroms")
-                pixel_size = 0.15
-
-        # print("Pixel size: {} angstroms".format(pixel_size))
-
-        # Compute the simulated image size to enforce consistent scaling
-        pixx, pixy = [int(np.round(a/pixel_size)) for a in atomcel[1::]]
-
-        total_atoms = 0
-        with open(os.path.dirname(__file__)+'/simulation/SAMPLE.XYZ', "w") as sf:
+        # Apply additional interface width adjustments (on top of interface_1_width which is set during initialization)
+        bc = self._adjust_interface_width(structure=bc, interface_width_1=interface_width)
+        bc = self._remove_interface_collisions(structure=bc, collision_removal_1=True)
+        # Use pixel_size to define shape of the output image 
+        pixx, pixy = np.round(np.array(bc.lattice.abc)/pix_size)[1::].astype(np.int)
+        
+        fmt = '% 4d', '% 8.4f', '% 9.4f', '% 9.4f', '% 4.2f', '% 4.3f'
+        # Write input structure file required for Kirkland STEM simulation
+        with open(os.getcwd()+'/simulation/SAMPLE.XYZ', "w") as sf:
             sf.write('Kirkland incostem input format\n')
-            sf.write(" "*5+"".join(str(format(word, '8.4f')).ljust(10) for word in [atomcel[1],atomcel[2],atomcel[0]])+"\n")
-            for idx in range(len(atompos)):
-                atom_position = [atompos.tolist()[idx][1],atomcel[2]-atompos.tolist()[idx][2],atompos.tolist()[idx][0]]
-                # Atoms on boundary get positions at 0 and at boundary - do NOT print one on boundary to avoid pesky overlap effects.
-                diff = np.array([atomcel[1],atomcel[2],atomcel[0]])-np.array(atom_position)
-                if not np.any(diff<0.01):
-                    sf.write(" "*2+str(bc.atomic_numbers[idx])+" "+\
-                          "".join(str(format(word, '8.4f')).ljust(10) for word in [atom_position[0],atom_position[1],atom_position[2]])+\
-                          " "+"1.0"+" "*3+"0.076\n")
-                    total_atoms+=1
+            sf.write(" "*5+"".join(str(format(word, '8.4f')).ljust(10) for word in [bc.lattice.b,bc.lattice.c,bc.lattice.a])+"\n")
+            coords_list = np.array(bc.cart_coords.tolist())
+            save_coords = np.vstack([np.array(bc.atomic_numbers),coords_list[:,1],bc.lattice.c-coords_list[:,2],coords_list[:,0],np.ones(len(coords_list[:,0])),0.076*np.ones(len(coords_list[:,0]))]).T
+            np.savetxt(sf,save_coords,fmt=fmt)
+            # np.save(os.getcwd()+'/simulation/coords_list.npy',save_coords)
             sf.write(" "*2+"-1")
 
-        # For debuggin purposes - we can see the structure that is created for the image simulation input file!
-        # with open(os.path.dirname(__file__)+'/simulation/demo.xyz', "w") as cf:
-        #     cf.write(str(total_atoms)+"\n")
-        #     cf.write("demo xyz structure file\n")
-        #     for idx in range(len(atompos)):
-        #         atom_position = [atompos.tolist()[idx][1],atomcel[2]-atompos.tolist()[idx][2],atompos.tolist()[idx][0]]
-        #         # Atoms on boundary get positions at 0 and at boundary - do NOT print one on boundary to avoid pesky overlap effects.
-        #         diff = np.array([atomcel[1],atomcel[2],atomcel[0]])-np.array(atom_position)
-        #         if not np.any(diff<0.01):
-        #             cf.write(str(bc.species[idx])+" "+"".join(str(format(word, '8.6f')).ljust(10) for word in [atom_position[0],atom_position[1],atom_position[2]])+"\n")
+        ## Uncomment for DEBUGGING (prints xyz of imaged structure)
+        #with open(os.getcwd()+'/simulation/demo.xyz', "w") as cf:
+        #    cf.write(str(len(bc.cart_coords.tolist()))+"\n")
+        #    cf.write("demo xyz structure file\n")
+        #    for idx in range(len(bc.cart_coords.tolist())):
+        #        atom_position = [bc.cart_coords.tolist()[idx][1],bc.lattice.c-bc.cart_coords.tolist()[idx][2],bc.cart_coords.tolist()[idx][0]]
+        #        cf.write(str(bc.species[idx])+" "+"".join(str(format(word, '8.6f')).ljust(10) for word in [atom_position[0],atom_position[1],atom_position[2]])+"\n")
 
-        with open(os.path.dirname(__file__)+'/simulation/params.txt', "w") as pf:
+        # Write parameter file required for Kirkland STEM simulation
+        with open(os.getcwd()+'/simulation/params.txt', "w") as pf:
             pf.write('SAMPLE.XYZ\n1 1 1\nSAMPLE.TIF\n'+str(pixx)+" "+str(pixy)+"\n")            
             pf.write("200 0 0 0 30\n100 150\nEND\n"+str(defocus)+"\n0")             
-
-        with cd(os.path.dirname(__file__)+'/simulation'):
-            subprocess.call("./incostem-"+opsys, stdout=subprocess.PIPE)
-     
-        im = np.asarray(cv2.imread(os.path.dirname(__file__)+'/simulation/SAMPLE.TIF',0))
-
-        xbuf, ybuf = [int(border_reduce[0]*np.shape(im)[1]),int(border_reduce[1]*np.shape(im)[0])]
-        im = im[ybuf:np.shape(im)[0]-ybuf,xbuf:np.shape(im)[1]-xbuf]
-
-        if filename:
-            if os.path.dirname(filename):
-                os.makedirs(os.path.dirname(filename), exist_ok=True)
-            cv2.imwrite(os.path.splitext(filename)[0]+".jpg",im)
         
-        os.remove(os.path.dirname(__file__)+'/simulation/SAMPLE.XYZ')
-        os.remove(os.path.dirname(__file__)+'/simulation/SAMPLE.TIF')
-        os.remove(os.path.dirname(__file__)+'/simulation/params.txt')
+        # Simulate image with Kirkland incostem
+        with cd(os.getcwd()+'/simulation'):
+            subprocess.call("./incostem-osx", stdout=subprocess.PIPE)
 
-        self.haadf_image = im
-        self.haadf_pixel = pixel_size
+        image = np.array(plt.imread(os.getcwd()+'/simulation/SAMPLE.TIF')).astype(np.float64)
 
-        return im
+        os.remove(os.getcwd()+'/simulation/SAMPLE.XYZ')
+        os.remove(os.getcwd()+'/simulation/SAMPLE.TIF')
+        os.remove(os.getcwd()+'/simulation/params.txt')
 
-    def to_vasp(self,filename,interface_width=0):
+        if view:
+            plt.imshow(image,cmap='hot'); plt.axis('off')
+            plt.show()
 
-        if os.path.dirname(filename):
-            os.makedirs(os.path.dirname(filename), exist_ok=True)
+        self.cell = image
+        return image
         
-        if interface_width:
-            new_struct = self._adjust_interface_width(interface_width)
-        else:
-            new_struct = self.structure
-
-        new_struct.to(filename=filename.split(".vasp")[0]+".POSCAR.vasp")
-
-    @staticmethod
-    def _find_approx_lcm(a,b,min_len=5,max_len=100):
+    def simulate_image(self, sim_params=[]):
         """
-        Given two floats, a and b, return the smallest floats a' and b' that approximate a multiple of both.
+        Calculate a full displayable STM image from DFT-simulation.
+        
+        Args:
+            sim_params: (list) specifying the following simulation parameters
+              - pix_size: (float) real-space pixel size (Å)
+              - interface_width: (float) spacing b/w max pos of bottom_grain and min pos of top grain (Å)
+              - defocus: (float) controls degree to which edges blur in microscopy image (Å)
+              - x_shear: (float) fractional amt shear in x (+ to the right)
+              - y_shear: (float) fractional amt shear in y (+ up direction)
+              - x_stretch: (float) fractional amt stretch (+) or compression (-) in x
+              - y_stretch: (float) fractional amt stretch (+) or compression (-) in y
+              - crop_height: (int) final (cropped) image height in pixels
+              - crop_width: (int) final (cropped) image width in pixels
+              
+        Returns:
+            A numpy array (np.float64) of the full simulated image. 
+        """
+        # Clamps the given pixel size to a range
+        if self.pix_size != None:
+            sim_params[0] = sorted((0.945*self.pix_size, sim_params[0], 1.055*self.pix_size))[1]
+        else:
+            sim_params[0] = sorted((0.1, sim_params[0], 0.4))[1]
+
+        # Clamp the interface_width to a range between -2 and 2 (Å)     
+        sim_params[1] = sorted((-2, sim_params[1], 2))[1]
+        
+        # Clamp the defocus to a range between 0.5 and 1.75 (Å)     
+        sim_params[2] = sorted((0.5, sim_params[2], 1.75))[1]
+
+        # Enforce max stretch/squeeze and max/min shear value (both directions 0.20)        
+        sim_params[3] = sorted((-0.20, sim_params[3], 0.20))[1]
+        sim_params[4] = sorted((-0.20, sim_params[4], 0.20))[1]
+        sim_params[5] = sorted((-0.20, sim_params[5], 0.20))[1]
+        sim_params[6] = sorted((-0.20, sim_params[6], 0.20))[1]
+
+        # Simulate the image cell
+        self._get_image_cell(defocus=sim_params[2], interface_width=sim_params[1], pix_size=sim_params[0], view=False)
+        
+        # Construct a larger cell by repeating image_cell in both directions
+        img_tiled = np.tile(self.cell,(1,4))
+        
+        # Resize image based on pixel_size
+        img_tiled = iop.apply_resize(img_tiled, np.array([int(a) for a in np.shape(img_tiled) * np.array(self.lw[::-1]) * (1./sim_params[0])]))
+
+        # Apply any specified postprocessing shear
+        img_tiled = iop.apply_shear(img_tiled, sim_params[3], sim_params[4])
+
+        # Apply any specified postprocessing strech/squeeze
+        img_tiled = iop.apply_stretch(img_tiled, sim_params[5], sim_params[6])
+
+        # Enforce odd sizes on width and length of cropped image (min_length = 25, max_length = current length)
+        sim_params[-1] = sorted((35,int(2 * np.floor(sim_params[-1]/2) + 1),int(2 * np.floor((np.shape(img_tiled)[1]-2)/2) + 1)))[1]
+        sim_params[-2] = sorted((35,int(2 * np.floor(sim_params[-2]/2) + 1),int(2 * np.floor((np.shape(img_tiled)[0]-2)/2) + 1)))[1]
+        
+        # Apply crop to image
+        image = iop.apply_crop(img_tiled,sim_params[-1],sim_params[-2])   
+
+        # If sucessful, record parameters!
+        self.sim_params = sim_params
+        self.image = image
+        return image    
+       
+    def simulate_image_random(self, pix_size="", crop_height="", crop_width=""): 
+        """
+        Randomly simulate a valid image.
+        
+        Args:
+            pix_size: (float) real-space edge length of a single pixel (in Å)
+            crop_height: (int) final (cropped) image height in pixels
+            crop_width: (int) final (cropped) image width in pixels
+        
+        Returns:
+            A numpy array (np.float64) of the full simulated image.
+        """
+        sim_params = self._random_initialize(pix_size=pix_size, crop_height=crop_height, crop_width=crop_width)
+        return self.simulate_image(sim_params)
+    
+    def _random_initialize(self, pix_size="", crop_height="", crop_width=""):
+        """
+        Randomly select a set of parameters to simulate a valid image
+        
+        Args:
+            pix_size: (float) real-space edge length of a single pixel (in Å)
+            crop_height: (int) final (cropped) image height in pixels
+            crop_width: (int) final (cropped) image width in pixels
+        
+        Returns:
+            A numpy array of sim_params (tuple) specifying the necessary simulation parameters for 'simulate_image'
+        """
+        interface_width = random.uniform(-2+(1E-10),2-(1E-10))
+
+        defocus = random.uniform(0.5+(1E-10),1.75-(1E-10))
+
+        x_shear  = random.uniform(-0.1,0.1)
+        y_shear  = random.uniform(-0.1,0.1) 
+        x_stretch  = random.uniform(-0.1,0.1)
+        y_stretch  = random.uniform(-0.1,0.1)
+            
+        if pix_size != "":
+            pix_size = pix_size + random.uniform(-0.015,0.015)
+        else:
+            pix_size = random.uniform(0.05,0.40)
+            
+        if crop_width == "":
+            if crop_height != "":
+                crop_width = int(random.uniform(0.80,1.2)*crop_height)
+            else:
+                crop_width = int(random.uniform(75,201))
+
+        if crop_height == "":
+            if crop_width != "":
+                crop_height = int(random.uniform(0.80,1.2)*crop_width)
+            else:
+                crop_height = int(random.uniform(75,201))
+
+        return [pix_size, interface_width, defocus, x_shear, y_shear, x_stretch, y_stretch, crop_height, crop_width]
+    
+    @staticmethod
+    def _find_optimal_expansion(x, y, min_len=5, max_len=100):
+        """
+        Given two floats, x and y, return integers a and b such that 
+        |ax - by| ≈ 0 subject to min/max constraints
 
         Args:
-            a: value 1
-            b: value 2
+            x: value 1
+            y: value 2
             min_length: min value of an approximate multiple
             max_length: max value of an approximate multiple
 
         Returns:
-            Approximate smallest multiples a', b', with tolerance
+            Smallest integers that best approximate the objective 
         """
-        alist = [a*i for i in range(1,100) if a*i < max_len and a*i > min_len]
-        blist = [b*i for i in range(1,100) if b*i < max_len and b*i > min_len]
+        alist = [x*i for i in range(1,100) if x*i < max_len and x*i > min_len]
+        blist = [y*i for i in range(1,100) if y*i < max_len and y*i > min_len]
         dmat = distance.cdist(np.array(alist).reshape(-1,1),np.array(blist).reshape(-1,1),'euclidean')
         result = min((min((v, c) for c, v in enumerate(row)), r) for r, row in enumerate(dmat))
-        return alist[result[1]], blist[result[0][1]], np.min(dmat)
-
-
-class PartialCharge(object):
-    def __init__(self, parchg_file="", minmax_width="", minmax_depth=""):
-        self.object = Chgcar.from_file(parchg_file)
-        self.structure = self.object.structure
-        self.stm_image = None
-
-    def stm(self, filename="", dm3="", pixel_size="", rotation_angle="", zthick="", ztol="", rho0="", rho_tol=""):
-        """
-        filename: A string representing the file name. The filename must include image format like .jpg, .png,
-        zthick - (float) thickness or depth from top in Angstroms
-        ztol - (float) Distance above the surface to consider
-        rho0 - (float) isosurface charge density plane
-        rho_tol - (float) tolerance to consider while determining isosurface
-
-        Credit: Chaitanya Kolluru
-        """
-        chg_obj = self.object
-        structure = self.structure
-        dim = chg_obj.dim
-
-        chg_data = chg_obj.data['total']
-        z_carts = structure.cart_coords[:, 2]
-        slab_thickness = z_carts.max() - z_carts.min()
-        vol = structure.volume
-        rho_max = (chg_data/vol).max()
-        zmax = z_carts.max() / structure.lattice.c
-
-        Px_x = structure.lattice.a / dim[0] 
-        Px_y = structure.lattice.b / dim[1]
-
-        ######## Check for invalid parameters ########
-        if not (-1 < zthick < 0.5*slab_thickness): # min thickness of 1 Ang assumed
-            print ("Exception: z thickness is greater than slab thickness")
-            return None
-        else: # convert distances to fractional coordinates
-            zthick = zthick / structure.lattice.c
-            ztol = ztol / structure.lattice.c
-
-        if not zmax+ztol < 1:
-            print ("Exception: zmax+ztol exceeds 1.0!")
-            return None
-
-        if not (rho_max/3 < rho0 < rho_max):
-            print ("Exception: rho0 {} is out of bounds".format(rho0))
-            return None
-
-        if not (0.0001 < rho_tol < 0.975*rho0):
-        # if not (0.0001 < rho_tol < 0.99*rho0):
-        # if not (0.0001 < rho_tol < rho0):
-            print("Exception: rho_tol {} out-of-bounds!".format(rho_tol))
-            return None
-
-        if not pixel_size:
-            pixel_size = np.min([Px_x,Px_y])
-
-        if not (0.145 < pixel_size < 0.185):
-            print("Exception: pixel size {} out-of-bounds!".format(pixel_size))
-            return None
-        ##############################################
-
-        nzmin = int(dim[2] * (zmax - zthick))
-        nzmax = int(dim[2] * (zmax + ztol))
-
-        try:
-            X, Y, Z = [], [], []
-            for x in range(dim[0]):
-                for y in range(dim[1]):
-                    for z in range(nzmin, nzmax):
-                        rho = chg_data[x][y][z]/vol
-                        if abs(rho - rho0) < rho_tol:
-                            X.append(x)
-                            Y.append(y)
-                            Z.append(z)
-            points_3d = []
-            for i, j, k in zip(X, Y, Z):
-                points_3d.append((i, j, k))
-
-            xy_dict = {}
-            for p_3d in points_3d:
-                p_xy = p_3d[:2]
-                p_z = p_3d[2]
-                if p_xy in xy_dict:
-                    if xy_dict[p_xy] < p_z:
-                        xy_dict[p_xy] = p_z
-                else:
-                    xy_dict[p_xy] = p_z
-
-            min_z = min(list(xy_dict.values()))
-            grid = np.zeros((dim[0], dim[1])) + min_z - 5
-            keys = xy_dict.keys()
-            for key in keys:
-                xi = key[0]
-                yi = key[1]
-                zi = xy_dict[key]
-                grid[xi][yi] = zi
-
-            img_tile = grid * (structure.lattice.c / dim[2])
-        except:
-            return None
-
-        if not pixel_size:
-            Px_x = structure.lattice.a / dim[0] 
-            Px_y = structure.lattice.b / dim[1]
-            pixel_size = np.min([Px_x,Px_y])
-
-
-        dim = (int(np.round(structure.lattice.abc[1]/float(pixel_size))),\
-               int(np.round(structure.lattice.abc[0]/float(pixel_size))))
-        img_tile = cv2.resize(img_tile,dim, interpolation=cv2.INTER_AREA)
-        img_tile = np.tile(img_tile,(9,9))
-
-        rotated = imutils.rotate(img_tile, rotation_angle)
-        edge_length = int(np.floor((np.min(np.shape(img_tile))/2)*np.sqrt(2)))
-        im = self._crop_center(rotated,edge_length,edge_length)
-
-        if filename:
-            if os.path.dirname(filename):
-                os.makedirs(os.path.dirname(filename), exist_ok=True)
-            img = im.astype(np.float64)
-            scaled = (img - img.min()) / (img.max() - img.min())
-            scaled = (255*scaled).astype(np.uint8)
-            cv2.imwrite(os.path.splitext(filename)[0]+".jpg",scaled)
-
-        self.stm_image = im
-        return im
-
+        return int(alist[result[1]]/x), int(blist[result[0][1]]/y), np.min(dmat)
+    
     @staticmethod
-    def _crop_center(img,cropx,cropy):
-        y,x = img.shape
-        startx = x//2 - cropx//2
-        starty = y//2 - cropy//2    
-        return img[starty:starty+cropy, startx:startx+cropx]
+    def _enforce_pb(pymatgen_structure):
+        """
+        Wrap atoms that have fixed coords outside cell back to their coord in cell. 
+        Notice this sometimes happens when using AseAtomsAdaptor.get_structure() to convert ASE to pymatgen
+        
+        Args:
+            pymatgen_structure
+                
+        Returns:
+            pymatgen_structure
+        """
+        s = pymatgen_structure.copy()
+        for i in range(len(s.frac_coords)):
+            s[i] = s[i].specie, [s[i].frac_coords[0]%1, s[i].frac_coords[1]%1, s[i].frac_coords[2]%1]
+        return s
+    
+    @staticmethod
+    def _resolve_pb_conflicts(pymatgen_structure):
+        """
+        If atoms near the 0 bound (width or depth only) interfere w/ atoms @ max bounds w/ PBC's, delete them!
+        
+        Args:
+            pymatgen_structure
+        
+        Returns:
+            pymatgen_structure
+        """
+        s = pymatgen_structure.copy()
+        pos = s.cart_coords
+        indel, i = [] , 0
+        for crd in pos:
+            if crd[0] < 0.5:
+                test_crd = crd.copy()
+                test_crd[0] += s.lattice.a
+                if np.any((distance_matrix([test_crd], pos)[0]< 1) == True) == True and i not in indel:
+                    indel.append(i)
+            if crd[1] < 0.5:
+                test_crd = crd.copy()
+                test_crd[1] += s.lattice.b
+                if np.any((distance_matrix([test_crd], pos)[0]< 1) == True) == True and i not in indel:
+                    indel.append(i)
+            i+=1
+        s.remove_sites(indel)
+        return s
+    
+    def simulation_summary(self, iter="", verbose=False):
+        """
+        Write the parameter summary to screen (or filename).
+        
+        Args:
+            filename: (string) name of the write file
+            
+        Returns:
+            None
+        """
+        # Unpack parameters specific to simulation
+        pix_size, interface_width, defocus, x_shear, y_shear, x_stretch, y_stretch, crop_height, crop_width = self.sim_params
+        summary = """Iteration {0}:
+        • pix_size (Å)              :  {1}
+        • interface width (Å)       :  {2}
+        • defocus (Å)               :  {3}
+        • (x, y) shear (frac)       :  {4}
+        • (x, y) stretch (frac)     :  {5}
+        • img_size (pixels)         :  {6}""".format(iter,pix_size, interface_width, defocus, (x_shear, y_shear), (x_stretch, y_stretch), (crop_height,crop_width))
+        if verbose:
+            print(summary)
+        else:
+            return summary
+
+    def write_poscar(self, filename='bicrystal.POSCAR.vasp', strain_info=""):
+        """
+        Write the pymatgen structure to a POSCAR file.
+        """
+        self.structure.to(filename=filename)
+        if strain_info != "":
+            summary = "-"*30+"\n"+"Strain in top grain (%)\n  >> width (along b) : {:.3f}\n  >> depth (along a) : {:.3f}\nStrain in bottom grain (%)\n  >> width (along b) : {:.3f}\n  >> depth (along a) : {:.3f}\n".format(*strain_info)+"-"*30
+            print(summary)
+            print(summary,file=open("strain_info.txt", "w"))
+
+    def display(self):
+        """
+        Display the simulated STM image.
+        """
+        plt.imshow(iop.scale_pixels(self.image,mode='grayscale'),cmap='gray')
+        plt.axis('off')
+        plt.show()
