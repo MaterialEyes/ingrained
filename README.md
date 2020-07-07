@@ -1,6 +1,6 @@
 ![image](https://drive.google.com/uc?export=view&id=1H3PYFTqZpiytEAR4KFbFV_7U2bKUWyUV)
 
-| :hammer_and_pick:| A framework for integrating materials imaging simulations into the experimental images they complement. |
+| :hammer_and_pick:| An automated framework for integrating materials imaging simulations into the experimental images they complement. |
 |---------------|:------------------------|
 
 ## Current features
