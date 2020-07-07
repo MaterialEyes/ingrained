@@ -1,6 +1,6 @@
 ![image](https://drive.google.com/uc?export=view&id=1H3PYFTqZpiytEAR4KFbFV_7U2bKUWyUV)
 
-| :hammer_and_pick:| Find a thorough fit for materials imaging simulations inside experimental microscopy images. |
+| :hammer_and_pick:| A framework for integrating materials imaging simulations into the experimental images they complement. |
 |---------------|:------------------------|
 
 ## Current features
