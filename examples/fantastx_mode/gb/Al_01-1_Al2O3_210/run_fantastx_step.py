@@ -32,8 +32,6 @@ bicrystal = Bicrystal(poscar_file=current_poscar);
 # Simulate an image 
 sim_img, __ = bicrystal.simulate_image(sim_params=sim_params)
 
-print(sim_params)
-
 # View the image before proceeding with optimization
 plt.imshow(sim_img,cmap='gray'); plt.axis('off'); plt.title('simulation'); plt.show();
 
