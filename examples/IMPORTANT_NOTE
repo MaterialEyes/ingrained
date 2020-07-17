@@ -1,0 +1,3 @@
+The 'clean_templates' and 'completed_runs' directory were created and populated using v1.0 of the code (refer to the tag). There was an error with how pixel size was defined and handled when the interface width was adjusted on the structure. These directories reflect calculations with the bug present. It does not affect the fundamental behavior of the code and the quality of the solutions presented ... however the results will be different when the examples are run with the new code. Keep this in mind. When these folders reflect the current pixel size handling, then this note will be deleted.
+
+- ESS (07/17/2020)

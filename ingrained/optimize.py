@@ -56,7 +56,7 @@ class CongruityBuilder(object):
             coodinates of the center pixel in the experiment
         """ 
         # Simulate an image using specified parameters
-        sim_img = self.sim_obj.simulate_image(sim_params=sim_params)
+        sim_img, sim_struct = self.sim_obj.simulate_image(sim_params=sim_params)
         
         # Display simulated image
         # self.sim_obj.display()
@@ -112,7 +112,7 @@ class CongruityBuilder(object):
             # Display matching pair (native resolution) stabilized
             plt.imshow(np.hstack([gs_exp_img,255*np.ones((np.shape(gs_exp_img)[0],5)),gs_sim_img]),cmap='hot'); plt.axis('off');
             plt.show()
-        return sim_img, exp_patch, us_shift_score, us_stable_idxs
+        return sim_img, sim_struct, exp_patch, us_shift_score, us_stable_idxs
     
     def fit_gb(self, sim_params = [], display=False, bias_x=0.0, bias_y=0.15):
         """
@@ -401,7 +401,7 @@ class CongruityBuilder(object):
         """
         xfit = [a for a in x[:-2]] + [int(a) for a in x[-2::]]
         try:
-            sim_img, exp_patch, shift_score, __ = self.fit(xfit, display=False);
+            sim_img, sim_struct, exp_patch, shift_score, __ = self.fit(xfit, display=False);
         except Exception as e: 
             print(e)
             sim_img = None
@@ -445,7 +445,7 @@ class CongruityBuilder(object):
         """
         xfit = [a for a in x[:-2]] + [int(a) for a in x[-2::]]
         try:
-            sim_img, exp_patch, shift_score, __ = self.fit_gb(xfit, display=False);
+            sim_img, sim_struct, exp_patch, shift_score, __ = self.fit_gb(xfit, display=False);
         except Exception as e: 
             print(e)
             sim_img = None

@@ -2,6 +2,7 @@ import time
 import sys, os
 sys.path.append('../../../')
 import numpy as np
+from skimage.io import imsave
 import matplotlib.pyplot as plt
 import ingrained.image_ops as iop
 from ingrained.structure import Bicrystal, PartialCharge
@@ -20,7 +21,7 @@ def blockPrint():
 def enablePrint():
     sys.stdout = sys.__stdout__
 
-def print_frames(config_file="", exp_img="", exp_title="", progress_file="", frame_selection="", search_mode="", cmap="hot"):
+def print_frames(config_file="", poscar_file="", exp_img="", exp_title="", progress_file="", frame_selection="", search_mode="", cmap="hot"):
 
 	if not isinstance(frame_selection, str):
 		print("Frame selection must be provided as a string! (i.e. 'all' or '3,8,26', or '1-10', or '1:3:300', etc.)")
@@ -46,14 +47,18 @@ def print_frames(config_file="", exp_img="", exp_title="", progress_file="", fra
 
 	if search_mode.lower() == 'gb':
 		# Initialize a Bicrystal object with the path to the slab json file
-		bicrystal = Bicrystal(filename=config_file);
+		if poscar_file != "":
+			bicrystal =Bicrystal(poscar_file='bicrystal.POSCAR.vasp')
+		else:
+			bicrystal = Bicrystal(config_file=config_file);
+
 		describe_frames = [exp_title,"HAADF simulation","$ingrained$ fit"]
 		sim_obj = bicrystal
 		bias_y=0.15
 
 	elif search_mode.lower() == 'stm':
 		# Initialize a PartialCharge object with the path to the PARCHG file
-		parchg = PartialCharge(filename=config_file);
+		parchg = PartialCharge(config_file=config_file);
 		describe_frames = [exp_title,"STM simulation","$ingrained$ fit"]
 		sim_obj = parchg
 		bias_y=0.00
@@ -78,7 +83,7 @@ def print_frames(config_file="", exp_img="", exp_title="", progress_file="", fra
 			xfit = [a for a in xfit[:-2]] + [int(a) for a in xfit[-2::]]
 			blockPrint()
 			try:
-				sim_img, exp_patch, shift_score, stable_idxs = congruity.fit_gb(sim_params = xfit, bias_y=bias_y)
+				sim_img, sim_struct, exp_patch, shift_score, stable_idxs = congruity.fit_gb(sim_params = xfit, bias_y=bias_y)
 			except:
 				sim_img = np.ones(np.shape(congruity.exp_img))
 				stable_idxs = (0,0)
@@ -93,7 +98,7 @@ def print_frames(config_file="", exp_img="", exp_title="", progress_file="", fra
 		xfit = [a for a in xfit[:-2]] + [int(a) for a in xfit[-2::]]
 		blockPrint()
 		try:
-			sim_img, exp_patch, shift_score, stable_idxs = congruity.fit_gb(sim_params = xfit, bias_y=bias_y)
+			sim_img, sim_struct, exp_patch, shift_score, stable_idxs = congruity.fit_gb(sim_params = xfit, bias_y=bias_y)
 		except:
 			sim_img = np.ones(np.shape(congruity.exp_img))
 			stable_idxs = (0,0)
@@ -108,7 +113,7 @@ def print_frames(config_file="", exp_img="", exp_title="", progress_file="", fra
 		xfit = [a for a in xfit[:-2]] + [int(a) for a in xfit[-2::]]
 		blockPrint()
 		try:
-			sim_img, exp_patch, shift_score, stable_idxs = congruity.fit_gb(sim_params = xfit, bias_y=bias_y)
+			sim_img, sim_struct, exp_patch, shift_score, stable_idxs = congruity.fit_gb(sim_params = xfit, bias_y=bias_y)
 		except:
 			sim_img = np.ones(np.shape(congruity.exp_img))
 			stable_idxs = (0,0)
@@ -124,7 +129,7 @@ def print_frames(config_file="", exp_img="", exp_title="", progress_file="", fra
 			xfit = [a for a in xfit[:-2]] + [int(a) for a in xfit[-2::]]
 			blockPrint()
 			try:
-				sim_img, exp_patch, shift_score, stable_idxs = congruity.fit_gb(sim_params = xfit, bias_y=bias_y)
+				sim_img, sim_struct, exp_patch, shift_score, stable_idxs = congruity.fit_gb(sim_params = xfit, bias_y=bias_y)
 			except:
 				sim_img = np.ones(np.shape(congruity.exp_img))
 				stable_idxs = (0,0)
@@ -141,7 +146,7 @@ def print_frames(config_file="", exp_img="", exp_title="", progress_file="", fra
 			xfit = [a for a in xfit[:-2]] + [int(a) for a in xfit[-2::]]
 			blockPrint()
 			try:
-				sim_img, exp_patch, shift_score, stable_idxs = congruity.fit_gb(sim_params = xfit, bias_y=bias_y)
+				sim_img, sim_struct, exp_patch, shift_score, stable_idxs = congruity.fit_gb(sim_params = xfit, bias_y=bias_y)
 			except:
 				sim_img = np.ones(np.shape(congruity.exp_img))
 				stable_idxs = (0,0)
@@ -158,7 +163,7 @@ def print_frames(config_file="", exp_img="", exp_title="", progress_file="", fra
 			xfit = [a for a in xfit[:-2]] + [int(a) for a in xfit[-2::]]
 			blockPrint()
 			try:
-				sim_img, exp_patch, shift_score, stable_idxs = congruity.fit_gb(sim_params = xfit, bias_y=bias_y)
+				sim_img, sim_struct, exp_patch, shift_score, stable_idxs = congruity.fit_gb(sim_params = xfit, bias_y=bias_y)
 			except:
 				sim_img = np.ones(np.shape(congruity.exp_img))
 				stable_idxs = (0,0)
@@ -173,7 +178,7 @@ def print_frames(config_file="", exp_img="", exp_title="", progress_file="", fra
 		xfit = [a for a in xfit[:-2]] + [int(a) for a in xfit[-2::]]
 		blockPrint()
 		try:
-			sim_img, exp_patch, shift_score, stable_idxs = congruity.fit_gb(sim_params = xfit, bias_y=bias_y)
+			sim_img, sim_struct, exp_patch, shift_score, stable_idxs = congruity.fit_gb(sim_params = xfit, bias_y=bias_y)
 		except:
 			sim_img = np.ones(np.shape(congruity.exp_img))
 			stable_idxs = (0,0)
@@ -187,3 +192,46 @@ def print_frames(config_file="", exp_img="", exp_title="", progress_file="", fra
 
 	time.sleep(1)
 	Printer("")
+
+def prepare_fantastx_input(config_file="",poscar_file="", exp_img="", progress_file=""):
+
+	
+	if poscar_file != "":
+		# Initialize a Bicrystal object with the path to the initial poscar
+		sim_obj = Bicrystal(poscar_file=poscar_file);
+	else:
+		# Initialize a Bicrystal object with the path to the slab json file
+		sim_obj = Bicrystal(config_file=config_file);
+	
+	bias_y=0.15
+
+	# Initialize a ConguityBuilder with PARCHG and experimental image
+	congruity = CongruityBuilder(sim_obj=sim_obj, exp_img=exp_img);
+
+	# Get solutions from text file
+	progress = np.genfromtxt(progress_file, delimiter=',')
+
+	save_path = os.path.dirname(os.path.realpath(progress_file))
+	os.makedirs(save_path+"/fantastx_start/", exist_ok=True) 
+	
+	best_idx = int(np.argmin(progress[:,-1]))
+	x = progress[best_idx]
+	xfit = x[1:-1]
+	xfit = [a for a in xfit[:-2]] + [int(a) for a in xfit[-2::]]
+
+	try:
+		sim_img, sim_struct, exp_patch, shift_score, stable_idxs = congruity.fit_gb(sim_params=xfit, bias_y=bias_y)
+	except:
+		sim_img = np.ones(np.shape(congruity.exp_img))
+
+	sim_struct.to(filename=save_path+"/fantastx_start/"+"ingrained.POSCAR.vasp")
+
+	match_ssim = iop.score_ssim(sim_img, exp_patch, win_size=35)
+	print("FOM: {}".format(match_ssim))
+
+	sim_params = xfit.copy()
+	sim_params[1] = 0
+	np.savetxt(save_path+"/fantastx_start/"+'sim_params', sim_params)
+
+	np.save(save_path+"/fantastx_start/"+"experiment.npy",exp_patch)
+	

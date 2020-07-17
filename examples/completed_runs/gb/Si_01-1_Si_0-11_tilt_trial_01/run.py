@@ -27,7 +27,7 @@ exp_img = exp_img[280:-120,180:-120]
 plt.imshow(exp_img,cmap='gray'); plt.axis('off'); plt.show();
 
 # Initialize a Bicrystal object with the path to the slab json file
-bicrystal = Bicrystal(filename='config.json', write_poscar=True);
+bicrystal = Bicrystal(config_file='config.json', write_poscar=True);
 
 # Initialize a ConguityBuilder with Bicrystal and experimental image
 congruity = CongruityBuilder(sim_obj=bicrystal, exp_img=exp_img);

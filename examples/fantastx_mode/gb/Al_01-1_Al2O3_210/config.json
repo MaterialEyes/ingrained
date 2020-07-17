@@ -1,0 +1,31 @@
+{
+	"slab_1":{
+		"chemical_formula":"Al",
+		"space_group":"Fm-3m",
+		"uvw_project":[0,1,-1],
+		"uvw_upward":[1,1,1],
+		"tilt_angle":0,
+		"max_dimension":30,
+		"flip_species":false
+	},
+	"slab_2":{
+		"chemical_formula":"Al2O3",
+		"space_group":"R-3c",
+		"uvw_project":[2,1,0],
+		"uvw_upward":[0,0,1],
+		"tilt_angle":0,
+		"max_dimension":30,
+		"flip_species":false
+	},
+	"constraints":{
+		"min_width":20,
+		"max_width":50,
+		"min_depth":8,
+		"max_depth":20,
+		"interface_1_width": 1.1658,
+		"interface_2_width": 2.3316,
+		"collision_removal":[false,false],
+		"pixel_size":""
+	},
+	"structure_file":"bicrystal.POSCAR.vasp"
+}

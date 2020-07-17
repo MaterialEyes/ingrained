@@ -32,15 +32,15 @@ class PartialCharge(object):
     This class contains the partial charge densities from a DFT-simulation
     with a calculator to simulate a STM image and perform postprocessing manipulations.
     """
-    def __init__(self, filename=""):
+    def __init__(self, config_file=""):
         """
         Initialize a PartialCharge object with the path to a PARCHG file.
                  
         Args:
-            filename: (string) path to a PARCHG file
+            config_file: (string) path to a PARCHG file
         """  
-        self.filename = filename
-        self.parchg = Chgcar.from_file(filename) 
+        self.config_file = config_file
+        self.parchg = Chgcar.from_file(config_file) 
         
         # Actual volumetric charge data from PARCHG 
         self.chgdata = self.parchg.data['total'] 
@@ -207,8 +207,7 @@ class PartialCharge(object):
             # If sucessful, record parameters!
             self.sim_params = sim_params
             self.image = image
-            return image
-    
+            return image, None
     
     def simulate_image_random(self, rotation="", pix_size="", crop_height="", crop_width=""): 
         """
@@ -224,7 +223,8 @@ class PartialCharge(object):
             A numpy array (np.float64) of the full simulated image.
         """
         sim_params = self._random_initialize(rotation=rotation, pix_size=pix_size, crop_height=crop_height, crop_width=crop_width)
-        return self.simulate_image(sim_params)
+        img_rand, __ = self.simulate_image(sim_params)
+        return img_rand
     
     def _random_initialize(self, rotation="", pix_size="", crop_height="", crop_width=""):
         """
@@ -360,10 +360,10 @@ class PartialCharge(object):
     
     def simulation_summary(self, iter="", verbose=False):
         """
-        Write the parameter summary to screen (or filename).
+        Write the parameter summary to screen (or config_file).
         
         Args:
-            filename: (string) name of the write file
+            config_file: (string) name of the write file
             
         Returns:
             None
@@ -398,63 +398,80 @@ class Bicrystal(object):
     as well as a calculator to fuse the slabs together into a bicrystal, simulate a convolution HAADF STEM image, 
     and perform postprocessing imaging manipulations.
     """
-    def __init__(self, filename="", write_poscar=False):
+    def __init__(self, config_file="", write_poscar=False, poscar_file=""):
         """
         Initialize a Bicrystal object with the path to a bicrystal slabs (json) file.
                  
         Args:
-            filename: (string) path to a bicrystal slabs file
+            config_file: (string) path to a bicrystal slabs file
         """  
-        self.filename = filename
-        slab = iop.open_construction_file(filename)
 
-        self.slab_1 = slab["slab_1"]
-        self.slab_2 = slab["slab_2"]
-        
-        # Copy simulation folder from install directory to cwd
-        try:
-            shutil.copytree(os.path.dirname(__file__)+'/simulation', os.getcwd()+'/simulation')
-        except:
-            pass
-
-        # Read constraints on dimensions for combined structure
-        constraints = slab["constraints"]
-
-        if "structure_file" not in slab:
-            # Actual structure for the top grain (slab positioned into top of bicrystal cell)
-            top_grain = TopGrain(self.slab_1["chemical_formula"], self.slab_1["space_group"],\
-                                 self.slab_1['uvw_project'], self.slab_1['uvw_upward'],\
-                                 self.slab_1['tilt_angle'], self.slab_1['max_dimension'],\
-                                 self.slab_1['flip_species'])
-            
-            # Actual structure for the bottom grain (slab positioned into bottom of bicrystal cell)
-            bot_grain = BottomGrain(self.slab_2["chemical_formula"], self.slab_2["space_group"],\
-                                 self.slab_2['uvw_project'], self.slab_2['uvw_upward'],\
-                                 self.slab_2['tilt_angle'], self.slab_2['max_dimension'],\
-                                 self.slab_2['flip_species'])         
-        
-            structure, top_grain_fit, bot_grain_fit, strain_info = self._get_base_structure(top_grain, bot_grain, constraints)
-            
-            self.top_grain = top_grain_fit
-            self.bot_grain = bot_grain_fit
-            self.structure = structure
+        if poscar_file != "":
+            poscar = Poscar.from_file(poscar_file)
+            self.structure = poscar.structure
+            pix_size = ""
 
         else:
-            poscar = Poscar.from_file(slab["structure_file"])
-            self.structure = poscar.structure
+            self.config_file = config_file
+            slab = iop.open_construction_file(config_file)
+
+            self.slab_1 = slab["slab_1"]
+            self.slab_2 = slab["slab_2"]
+            
+            # Copy simulation folder from install directory to cwd
+            try:
+                shutil.copytree(os.path.dirname(__file__)+'/simulation', os.getcwd()+'/simulation')
+            except:
+                pass
+
+            # Read constraints on dimensions for combined structure
+            constraints = slab["constraints"]
+
+            if "structure_file" not in slab:
+                # Actual structure for the top grain (slab positioned into top of bicrystal cell)
+                top_grain = TopGrain(self.slab_1["chemical_formula"], self.slab_1["space_group"],\
+                                     self.slab_1['uvw_project'], self.slab_1['uvw_upward'],\
+                                     self.slab_1['tilt_angle'], self.slab_1['max_dimension'],\
+                                     self.slab_1['flip_species'])
+                
+                # Actual structure for the bottom grain (slab positioned into bottom of bicrystal cell)
+                bot_grain = BottomGrain(self.slab_2["chemical_formula"], self.slab_2["space_group"],\
+                                     self.slab_2['uvw_project'], self.slab_2['uvw_upward'],\
+                                     self.slab_2['tilt_angle'], self.slab_2['max_dimension'],\
+                                     self.slab_2['flip_species'])         
+            
+                structure, top_grain_fit, bot_grain_fit, strain_info = self._get_base_structure(top_grain, bot_grain, constraints)
+                
+                self.top_grain = top_grain_fit
+                self.bot_grain = bot_grain_fit
+                self.structure = structure
+
+            else:
+                poscar = Poscar.from_file(slab["structure_file"])
+                self.structure = poscar.structure
+
+            try:
+                pix_size = constraints['pixel_size']
+            except:
+                pix_size = ""
 
         # Image fields
-        if constraints['pixel_size'] != "":
-            self.pix_size = constraints['pixel_size'] 
+        if pix_size != "":
+            self.pix_size = pix_size
         else:
             self.pix_size = None
 
-        self.cell  = self._get_image_cell()
+        # self.cell, __  = self._get_image_cell()
+        # self.image = None
+        # self.sim_params = None
+        
+        # self.lw = (self.structure.lattice.b/np.shape(self.cell)[1],
+        #            self.structure.lattice.c/np.shape(self.cell)[0])
+
+        self.cell = None
         self.image = None
         self.sim_params = None
-        
-        self.lw = (self.structure.lattice.b/np.shape(self.cell)[1],
-                   self.structure.lattice.c/np.shape(self.cell)[0])
+        self.lw = None
 
         if write_poscar:
             self.write_poscar(strain_info=strain_info)
@@ -598,7 +615,6 @@ class Bicrystal(object):
         
             # Get copy of current structure with atom positions
             bc = new_struct_2.copy()
-
         return bc      
             
     def _remove_interface_collisions(self, structure="", collision_removal_1=False, collision_removal_2=False, collision_distance=1):
@@ -682,13 +698,16 @@ class Bicrystal(object):
 
         Returns:
             A numpy array (np.float64) of the simulated image tile.
+            A pymatgen structure with interface and collision adjustments
         """
+
         # Get copy of current structure
         bc =self.structure.copy() 
         
         # Apply additional interface width adjustments (on top of interface_1_width which is set during initialization)
         bc = self._adjust_interface_width(structure=bc, interface_width_1=interface_width)
         bc = self._remove_interface_collisions(structure=bc, collision_removal_1=True)
+
         # Use pixel_size to define shape of the output image 
         pixx, pixy = np.round(np.array(bc.lattice.abc)/pix_size)[1::].astype(np.int)
         
@@ -731,7 +750,9 @@ class Bicrystal(object):
             plt.show()
 
         self.cell = image
-        return image
+        self.lw = (bc.lattice.b/np.shape(image)[1],bc.lattice.c/np.shape(image)[0])
+
+        return image, bc
         
     def simulate_image(self, sim_params=[]):
         """
@@ -771,10 +792,20 @@ class Bicrystal(object):
         sim_params[6] = sorted((-0.20, sim_params[6], 0.20))[1]
 
         # Simulate the image cell
-        self._get_image_cell(defocus=sim_params[2], interface_width=sim_params[1], pix_size=sim_params[0], view=False)
+        old_struct = self.structure.copy()
+        # print(self.lw)
         
+        img_cell, new_struct = self._get_image_cell(defocus=sim_params[2], interface_width=sim_params[1], pix_size=sim_params[0], view=False)
+        
+        # if new_struct == old_struct:
+        #     print("No modifications were made to the structure!")
+        # else:
+        #     print("The structure was modified!")
+
+        # print(self.lw)
+
         # Construct a larger cell by repeating image_cell in both directions
-        img_tiled = np.tile(self.cell,(1,4))
+        img_tiled = np.tile(img_cell,(1,4))
         
         # Resize image based on pixel_size
         img_tiled = iop.apply_resize(img_tiled, np.array([int(a) for a in np.shape(img_tiled) * np.array(self.lw[::-1]) * (1./sim_params[0])]))
@@ -795,7 +826,7 @@ class Bicrystal(object):
         # If sucessful, record parameters!
         self.sim_params = sim_params
         self.image = image
-        return image    
+        return image, new_struct   
        
     def simulate_image_random(self, pix_size="", crop_height="", crop_width=""): 
         """
@@ -810,7 +841,8 @@ class Bicrystal(object):
             A numpy array (np.float64) of the full simulated image.
         """
         sim_params = self._random_initialize(pix_size=pix_size, crop_height=crop_height, crop_width=crop_width)
-        return self.simulate_image(sim_params)
+        img_rand, __ = self.simulate_image(sim_params)
+        return img_rand
     
     def _random_initialize(self, pix_size="", crop_height="", crop_width=""):
         """
@@ -921,10 +953,10 @@ class Bicrystal(object):
     
     def simulation_summary(self, iter="", verbose=False):
         """
-        Write the parameter summary to screen (or filename).
+        Write the parameter summary to screen (or config_file).
         
         Args:
-            filename: (string) name of the write file
+            config_file: (string) name of the write file
             
         Returns:
             None

@@ -233,6 +233,19 @@ def open_construction_file(slab_path):
     with open(slab_path,'r') as f:
         return json.loads(f.read())
 
+def load_sim_params(param_file):
+    """
+    Load simulation parameters to a numpy array with proper entry types
+    
+    Args:
+        param_file (string) path to param file
+
+    Return:
+        A numpy array of entries from param_file
+    """
+    xfit = np.loadtxt(param_file)
+    return [a for a in xfit[:-2]] + [int(a) for a in xfit[-2::]]
+
 def read_SXM_file(sxm_path):
     """
     Read a sxm file and store as numpy array within dictionary
@@ -290,6 +303,21 @@ def read_tif_file(tif_path):
     d["Experiment Pixel Size"] = ""
     return d
 
+def read_png_file(png_path):
+    """
+    Read a png file and store as numpy array within dictionary
+
+    Args:
+        png_path (string) path to file
+
+    Return:
+        A dict containing the raw pixel values and the pixel size information
+    """
+    d = {}
+    d["Pixels"] = plt.imread(png_path)
+    d["Experiment Pixel Size"] = ""
+    return d
+
 def read_dm3_file(dm3_path):
     """
     Read a dm3 file and store as numpy array within dictionary
@@ -324,6 +352,8 @@ def image_open(filename):
         d = read_dm3_file(filename) # Note: dm4 untested!
     elif filename.split(".")[-1] in ['tif']:
         d = read_tif_file(filename)
+    elif filename.split(".")[-1] in ['png', 'jpg']:
+        d = read_png_file(filename)
     else:
         print("Cannot read image from file. The extension \"{}\" is currently not supported!".format(filename.split(".")[-1]))
         d = None

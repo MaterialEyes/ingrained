@@ -16,7 +16,7 @@ exp_img = image_data['Pixels'][0:470,0:470]
 plt.imshow(exp_img,cmap='gray'); plt.axis('off'); plt.show();
 
 # Initialize a Bicrystal object and save the constructed bicrystal structure
-bicrystal = Bicrystal(filename='config.json', write_poscar=True);
+bicrystal = Bicrystal(config_file='config.json', write_poscar=True);
 
 # Initialize a ConguityBuilder with the Bicrystal and experimental image
 congruity = CongruityBuilder(sim_obj=bicrystal, exp_img=exp_img);
