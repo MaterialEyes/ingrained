@@ -22,14 +22,14 @@ bicrystal = Bicrystal(config_file='config.json', write_poscar=True);
 congruity = CongruityBuilder(sim_obj=bicrystal, exp_img=exp_img);
 
 # Input parameters to optimize for an image simulation:
-pix_size          = 0.18 
-interface_width   = 0.00
-defocus           = 1.50
+pix_size          = image_data["Experiment Pixel Size"]+0.005
+interface_width   = 0.20
+defocus           = 1.25
 x_shear           = 0.00
 y_shear           = 0.00
 x_stretch         = 0.00
 y_stretch         = 0.00
-crop_height       = 211
+crop_height       = 201
 crop_width        = 167
 
 sim_params = [pix_size, interface_width, defocus, x_shear, y_shear, x_stretch, y_stretch, crop_height, crop_width]
