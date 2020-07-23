@@ -25,7 +25,7 @@
 		"interface_1_width": 1.117,
 		"interface_2_width": 1.117,
 		"collision_removal":[true,true],
-		"pixel_size":0.1200
+		"pixel_size":""
 	},
-	"structure_file":"HAADF85.POSCAR.vasp"
+	"structure_file":"bicrystal.POSCAR.vasp"
 }

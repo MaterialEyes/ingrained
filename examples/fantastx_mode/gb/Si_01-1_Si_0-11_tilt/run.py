@@ -27,21 +27,23 @@ exp_img = exp_img[280:-120,180:-120]
 plt.imshow(exp_img,cmap='gray'); plt.axis('off'); plt.show();
 
 # Initialize a Bicrystal object with the path to the slab json file
-bicrystal = Bicrystal(config_file='config.json', write_poscar=True);
+# bicrystal = Bicrystal(config_file='config.json', write_poscar=True);
+
+bicrystal = Bicrystal(poscar_file='bicrystal.POSCAR.vasp');
 
 # Initialize a ConguityBuilder with Bicrystal and experimental image
 congruity = CongruityBuilder(sim_obj=bicrystal, exp_img=exp_img);
 
 # Input parameters to optimize for an image simulation:
-pix_size          = 0.12
-interface_width   = 0.50
-defocus           = 1.30
+pix_size          = 0.105
+interface_width   = 0.00
+defocus           = 1.00
 x_shear           = 0.00
 y_shear           = 0.00
 x_stretch         = 0.00
-y_stretch         = 0.00
-crop_height       = 339
-crop_width        = 183
+y_stretch         = 0.02
+crop_height       = 369
+crop_width        = 169
 
 sim_params = [pix_size, interface_width, defocus, x_shear, y_shear, x_stretch, y_stretch, crop_height, crop_width]
 
