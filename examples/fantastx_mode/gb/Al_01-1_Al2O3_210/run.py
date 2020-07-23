@@ -33,16 +33,16 @@ bicrystal = Bicrystal(poscar_file='bicrystal.POSCAR.vasp');
 congruity = CongruityBuilder(sim_obj=bicrystal, exp_img=exp_img);
 
 # Define initial set of input parameters for an image simulation
-pix_size          = 0.126
+pix_size          = 0.1275
 # pix_size          = image_data["Experiment Pixel Size"]
 interface_width   = 0.00
-defocus           = 1.30
+defocus           = 1.00
 x_shear           = 0.00
 y_shear           = 0.00
 x_stretch         = 0.00
 y_stretch         = 0.00
-crop_height       = 449
-crop_width        = 143
+crop_height       = 499
+crop_width        = 185
 
 sim_params = [pix_size, interface_width, defocus, x_shear, y_shear, x_stretch, y_stretch, crop_height, crop_width]
 

@@ -25,6 +25,6 @@
                 "interface_1_width": 1,
                 "interface_2_width": 1.5,
                 "collision_removal":[true,true],
-                "pixel_size":0.14
+                "pixel_size":""
         }
 }

@@ -777,7 +777,8 @@ class Bicrystal(object):
         if self.pix_size != None:
             sim_params[0] = sorted((0.945*self.pix_size, sim_params[0], 1.055*self.pix_size))[1]
         else:
-            sim_params[0] = sorted((0.1, sim_params[0], 0.4))[1]
+            # sim_params[0] = sorted((0.1, sim_params[0], 0.4))[1]
+            sim_params[0] = sorted((0.05, sim_params[0], 0.4))[1]
 
         # Clamp the interface_width to a range between -2 and 2 (Å)     
         sim_params[1] = sorted((-2, sim_params[1], 2))[1]
