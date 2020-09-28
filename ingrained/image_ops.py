@@ -1,12 +1,11 @@
 import os
 import json
 import numpy as np
-import skimage.measure 
 import matplotlib.pyplot as plt
 from skimage import transform
 from skimage.draw import polygon
 from skimage.filters import gaussian
-from sklearn.preprocessing import MinMaxScaler
+from skimage.metrics import structural_similarity as ssim
 
 # for pySPM, might need to run: 
 # >> pip install pySPM
@@ -183,11 +182,9 @@ def scale_pixels(img, mode=None):
     Args:
         mode: (string) pixel scaling technique
           rescale    :  stretch the pixel intensities so to fill the range from 0 to 1 (float64)
-          minmax     :  scaling features to lie between 0,1 (scales and translates each feature individually) (float64)
           center     :  enforce zero mean, unit variance (float64)
           grayscale  :  stretch the pixel intensities so to fill the range from 0 to 255 (uint8)
-          grayminmax :  scaling features to lie between 0,255 (scales and translates each feature individually) (uint8)
-          
+
     Returns:
         A numpy array (either float64 or uint8) of the scaled image.
     """
@@ -196,15 +193,11 @@ def scale_pixels(img, mode=None):
         return img
     elif mode == 'rescale':
         return ((img - img.min()) / (img.max() - img.min()) + 1E-16).astype(np.float64)
-    elif mode == 'minmax':
-        return MinMaxScaler().fit_transform(img).astype(np.float64)
     elif mode == 'center':
         return ((img - img.mean()) / (img.std())).astype(np.float64)
     elif mode == 'grayscale':
         return (255*(img - img.min()) / (img.max() - img.min()) + 1E-16).astype(np.uint8)
-    elif mode == 'grayminmax':
-        return MinMaxScaler(feature_range=(0, 255)).fit_transform(img).astype(np.uint8)
-
+    
 def score_ssim(img1,img2,win_size=35):
     """
     Compute the mean structural similarity index between two images
@@ -216,9 +209,9 @@ def score_ssim(img1,img2,win_size=35):
     Return:
         1 - the mean structural similarity index (i.e. ΔSSIM)
     """
-    img1 = scale_pixels(img1, mode='grayscale')
-    img2 = scale_pixels(img2, mode='grayscale')
-    return 1 - skimage.measure.compare_ssim(img1,img2,win_size)
+    img1 = scale_pixels(img1, mode='rescale')
+    img2 = scale_pixels(img2, mode='rescale')
+    return 1 - ssim(img1,img2,win_size)
 
 def open_construction_file(slab_path):
     """
