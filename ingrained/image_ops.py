@@ -198,7 +198,7 @@ def scale_pixels(img, mode=None):
     elif mode == 'grayscale':
         return (255*(img - img.min()) / (img.max() - img.min()) + 1E-16).astype(np.uint8)
     
-def score_ssim(img1,img2,win_size=35):
+def score_ssim_deprecated(img1,img2,win_size=35):
     """
     Compute the mean structural similarity index between two images
     
@@ -209,9 +209,23 @@ def score_ssim(img1,img2,win_size=35):
     Return:
         1 - the mean structural similarity index (i.e. ΔSSIM)
     """
+    img1 = scale_pixels(img1, mode='grayscale')
+    img2 = scale_pixels(img2, mode='grayscale')
+    return 1 - ssim(img1,img2,win_size=win_size)
+
+def score_ssim(img1,img2):
+    """
+    Compute the mean structural similarity index between two images
+    
+    Args:
+        img1, img2:  (ndarray) images 
+        
+    Return:
+        1 - the mean structural similarity index (i.e. ΔSSIM)
+    """
     img1 = scale_pixels(img1, mode='rescale')
     img2 = scale_pixels(img2, mode='rescale')
-    return 1 - ssim(img1,img2,win_size)
+    return 1 - ssim(img1,img2)
 
 def open_construction_file(slab_path):
     """
