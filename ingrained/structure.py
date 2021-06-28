@@ -87,6 +87,45 @@ class PartialCharge(object):
             rhos  = np.swapaxes(np.swapaxes(self.chgdata.copy(),0,2),1,2)[nzmin:nzmax,:,:]/self.structure.volume
             return rhos, nzmax
     
+
+    def _shift_sites(self):
+        """
+        Translate all coordinates such that the maximum of the 
+        maximum of the charge density is around the center
+        of the cell.
+        """
+
+    
+        # Translate atomic positions so zmax is in the center of the cell
+        
+        self.structure.translate_sites(indices=range(self.structure.num_sites), \
+                    vector=[0,0,self.structure.lattice.c*(.5-self.zmax)], \
+                                  frac_coords=False)
+        zmax_index=int(self.zmax*self.parchg.dim[2])
+
+        ngzf = self.parchg.dim[2]
+
+        new_dat = []
+        for i in range(self.parchg.dim[0]):
+            new_dat.append([])
+            for j in  range(self.parchg.dim[1]):
+                dat_slice = self.chgdata[i][j]
+                if self.zmax>.5:
+                     new_dat[i].append(np.concatenate((dat_slice[zmax_index-int(ngzf/2):zmax_index],
+                                     dat_slice[zmax_index:],
+                                     dat_slice[:zmax_index-int(ngzf/2)])))
+                else:
+                     new_dat[i].append(np.concatenate((dat_slice[zmax_index+int(ngzf/2):],
+                                     dat_slice[:zmax_index],
+                                     dat_slice[zmax_index:zmax_index+int(ngzf/2)])))
+ 
+                    
+        self.chgdata = new_dat
+        self.zmax = self.structure.cart_coords[:, 2].max()/ \
+                        self.structure.lattice.c 
+
+        self.structure.to('POSCAR','POSCAR_centered')
+    
     def _get_stm_cell(self, z_below="", z_above="", r_val="", r_tol=""):
         """
         Calculate a single STM image cell from DFT-simulation. 
