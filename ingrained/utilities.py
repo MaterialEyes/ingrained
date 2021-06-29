@@ -1,6 +1,6 @@
 import time
 import sys, os
-sys.path.append('../../../')
+#sys.path.append('../../../')
 import numpy as np
 from skimage.io import imsave
 import matplotlib.pyplot as plt
@@ -39,9 +39,9 @@ def print_frames(config_file="", poscar_file="", exp_img="", exp_title="", progr
 			3,8,26 : multiple individual frames (#3, #8, #26)
 			4-74   : frames within a range (#4 through and including #74)
 			1:2:30 : start, step, stop sequence of frames
-			
+
 		>> Selection:  """)
-	
+
 	else:
 		decision = frame_selection
 
@@ -74,8 +74,8 @@ def print_frames(config_file="", poscar_file="", exp_img="", exp_title="", progr
 	progress = np.genfromtxt(progress_file, delimiter=',')
 
 	save_path = os.path.dirname(os.path.realpath(progress_file))
-	os.makedirs(save_path+"/frames/", exist_ok=True) 
-	
+	os.makedirs(save_path+"/frames/", exist_ok=True)
+
 	if decision.lower() == 'all':
 		for i in range(np.shape(progress)[0]):
 			x = progress[i]
@@ -185,7 +185,7 @@ def print_frames(config_file="", poscar_file="", exp_img="", exp_title="", progr
 		congruity.display_panel(moving=sim_img, critical_idx=stable_idxs, score=x[-1], iternum=int(x[0]), cmap=cmap, title_list=describe_frames, savename=save_path+'/frames/ingrained'+'-'+str(idx).zfill(5)+'.png')
 		enablePrint()
 		Printer("Writing frame {} to file".format(idx))
-	
+
 	else:
 		Printer("Selection \"{}\" not understood!".format(decision))
 		print()
@@ -195,14 +195,14 @@ def print_frames(config_file="", poscar_file="", exp_img="", exp_title="", progr
 
 def prepare_fantastx_input(config_file="",poscar_file="", exp_img="", progress_file=""):
 
-	
+
 	if poscar_file != "":
 		# Initialize a Bicrystal object with the path to the initial poscar
 		sim_obj = Bicrystal(poscar_file=poscar_file);
 	else:
 		# Initialize a Bicrystal object with the path to the slab json file
 		sim_obj = Bicrystal(config_file=config_file);
-	
+
 	bias_y=0.15
 
 	# Initialize a ConguityBuilder with PARCHG and experimental image
@@ -212,8 +212,8 @@ def prepare_fantastx_input(config_file="",poscar_file="", exp_img="", progress_f
 	progress = np.genfromtxt(progress_file, delimiter=',')
 
 	save_path = os.path.dirname(os.path.realpath(progress_file))
-	os.makedirs(save_path+"/fantastx_start/", exist_ok=True) 
-	
+	os.makedirs(save_path+"/fantastx_start/", exist_ok=True)
+
 	best_idx = int(np.argmin(progress[:,-1]))
 	x = progress[best_idx]
 	xfit = x[1:-1]
@@ -234,4 +234,3 @@ def prepare_fantastx_input(config_file="",poscar_file="", exp_img="", progress_f
 	np.savetxt(save_path+"/fantastx_start/"+'sim_params', sim_params)
 
 	np.save(save_path+"/fantastx_start/"+"experiment.npy",exp_patch)
-	

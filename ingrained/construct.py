@@ -5,13 +5,13 @@ import matplotlib.pyplot as plt
 from scipy.spatial import KDTree, Delaunay, distance_matrix
 
 # pymatgen tools
-from pymatgen import MPRester
+from pymatgen.ext.matproj import MPRester
 from pymatgen.io.xyz import XYZ
 from pymatgen.io.ase import AseAtomsAdaptor
 from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
 
-class Slab(object):                   
-    def __init__(self, chemical_formula, space_group, uvw_project, uvw_upward, tilt_angle, max_dimension): 
+class Slab(object):
+    def __init__(self, chemical_formula, space_group, uvw_project, uvw_upward, tilt_angle, max_dimension):
         self.chemical_formula = chemical_formula
         self.space_group = space_group
         self.unit_cell = self._query_MP()
@@ -30,8 +30,8 @@ class Slab(object):
         """
         mpr = MPRester("MAPI_KEY")
         query = mpr.query(criteria={"pretty_formula": self.chemical_formula}, properties=["structure","icsd_ids","spacegroup"])
-        
-        # First filter by space_group if provided 
+
+        # First filter by space_group if provided
         if self.space_group:
             query = [query[i] for i in range(len(query)) if SpacegroupAnalyzer(query[i]['structure']).get_space_group_symbol()==self.space_group]
 
@@ -52,7 +52,7 @@ class Slab(object):
         Returns:
             A pymatgen supercell (max_dimension preserved when structure cubed after rotation)
         """
-        # 
+        #
         supercell = self.unit_cell.copy()
 
         # Each row should correspond to a lattice vector.
@@ -63,17 +63,17 @@ class Slab(object):
         a_start = 0.5
         expansion_vector = np.array([1,1,1])
         expansion_matrix = lattice_matrix
-        expand = np.sqrt(3)# [value_false, value_true][<test>] 
+        expand = np.sqrt(3)# [value_false, value_true][<test>]
 
         while a_start < (float(max_dimension+10)*expand)/2:
 
-            # Find lattice vector with minimum length   
+            # Find lattice vector with minimum length
             _ , idx = KDTree(expansion_matrix).query([0,0,0])
-            
+
             # Update expansion vector
             expansion_vector[idx]+= 1
-            
-            # Update expansion matrix 
+
+            # Update expansion matrix
             expansion_matrix = (lattice_matrix.T*expansion_vector).T
 
             # Update bounding box
@@ -94,7 +94,7 @@ class Slab(object):
         return supercell
 
     def construct_oriented_slab(self,uvw_project,uvw_upward,tilt_angle,max_dimension):
-        """ 
+        """
         Construct a slab, oriented for a specific direction of viewing, and slice into a cube
 
         Args:
@@ -105,7 +105,7 @@ class Slab(object):
             max_dimension: A float representing the max edge length of the supercell
 
         Returns:
-            A pymatgen supercell (cube) oriented for a specific direction of viewing 
+            A pymatgen supercell (cube) oriented for a specific direction of viewing
         """
         slab = self._construct_slab(max_dimension)
 
@@ -117,29 +117,29 @@ class Slab(object):
         # Convert u,v,w vector to cartesian
         along_xyz = np.matmul(np.array(atom.get_cell()).T,uvw_project)
 
-        # Rotate coordinates and cell so that 'along_xyz' is coincident with [0,0,1] 
+        # Rotate coordinates and cell so that 'along_xyz' is coincident with [0,0,1]
         atom.rotate(along_xyz,[0,0,1],rotate_cell=True)
 
         # Convert u,v,w vector to cartesian
         upwrd_xyz = np.matmul(np.array(atom.get_cell()).T,uvw_upward)
 
-        # Rotate coordinates and cell so that 'upwrd_xyz' is coincident with [0,1,0] 
+        # Rotate coordinates and cell so that 'upwrd_xyz' is coincident with [0,1,0]
         atom.rotate(upwrd_xyz,[0,1,0],rotate_cell=True)
 
         # Rotate coordinates along z to capture tilt angle
         atom.rotate(tilt_angle,'z')
-        
+
         bx_size = ((max_dimension+1)/2)
 
         pos = atom.get_positions()
-        pos -= self._centroid_coordinates(atom.get_positions())    
-        atom.set_positions(pos) 
+        pos -= self._centroid_coordinates(atom.get_positions())
+        atom.set_positions(pos)
 
         inidx = np.all(np.logical_and(pos>=[-bx_size,-bx_size,-bx_size],pos<=[bx_size,bx_size,bx_size]),axis=1)
 
         if not np.sum(inidx)>0:
             warnings.warn('Unit cell entirely outside bounding volume')
-          
+
         del atom[np.logical_not(inidx)]
 
         # Enforce (0,0,0) origin and reset cell around rotated/chiseled slab
@@ -152,16 +152,16 @@ class Slab(object):
 
     def get_repeat_dist(self,direction="width",mode="tol"):
         """
-        Find the approximate length needed for one full repeat of the structure along width or depth. 
+        Find the approximate length needed for one full repeat of the structure along width or depth.
 
         Args:
             pymatgen_structure: The input pymatgen structure
-            direction: The direction along which to find repeat length 
+            direction: The direction along which to find repeat length
                        (width = perp to uvw_project and uvw_upward, depth = along uvw_project)
             mode: The decision used to accept the solution (tol = min tolerance, len = min length)
 
         Returns:
-            A float representing the length needed for structure to repeat. 
+            A float representing the length needed for structure to repeat.
         """
         slab = AseAtomsAdaptor.get_atoms(self.slab)
         positions_list = slab.get_positions()
@@ -170,10 +170,10 @@ class Slab(object):
 
         dtol = []
         for element in chemical_symbols:
-            # Get all indices of 
+            # Get all indices of
             indices = [int(i) for i, elem in enumerate(chemical_symbols_list) if element in elem]
-            position = np.array([positions_list[idx] for idx in indices])                     
-            for select_idx in range(np.shape(position)[0]):           
+            position = np.array([positions_list[idx] for idx in indices])
+            for select_idx in range(np.shape(position)[0]):
                 if direction == 'width':
                     # Filter out atoms that have same a
                     position_filt = np.array([a for a in position if a[0] != position[select_idx][0]])
@@ -188,7 +188,7 @@ class Slab(object):
                         adis = np.round(np.abs(position[select_idx][0]-position_filt[cb_idx][0]),4)
                         # Compute "b" tolerance to closest proxy atom
                         btol = np.round(np.abs((position_filt[cb_idx][1]-position[select_idx][1])),4)
-                elif direction == 'depth': 
+                elif direction == 'depth':
                     # Filter out atoms that have same c
                     position_filt = np.array([a for a in position if a[2] != position[select_idx][2]])
                     # Filter out atoms that are not at same width (has tolerance)
@@ -232,7 +232,7 @@ class Slab(object):
         Test if points in `p` are in `hull`
 
         `p` should be a `NxK` coordinates of `N` points in `K` dimensions
-        `hull` is either a scipy.spatial.Delaunay object or the `MxK` array of the 
+        `hull` is either a scipy.spatial.Delaunay object or the `MxK` array of the
         coordinates of `M` points in `K`dimensions for which Delaunay triangulation
         will be computed
         """
@@ -248,7 +248,7 @@ class Slab(object):
 class TopGrain(Slab):
     def __init__(self, chemical_formula, space_group, uvw_project, uvw_upward, tilt_angle, max_dimension, flip_species=False):
         super().__init__(chemical_formula, space_group, uvw_project, uvw_upward, tilt_angle, max_dimension)
-        
+
         self.height = max_dimension
         self.structure = self.set_in_bicrystal(flip_species=flip_species)
 
@@ -257,11 +257,11 @@ class TopGrain(Slab):
         Given grains, find the proper width/depth dimensions
 
         Args:
-            pymatgen_structure: The input pymatgen grain structure 
-            width: The width of the bicrystal supercell to set grain in 
-            height: The height of the bicrystal supercell to set grain in 
-            depth: The depth of the bicrystal supercell to set grain in 
-            set_in: The position (top/bottom) to set grain in bicrystal supercell 
+            pymatgen_structure: The input pymatgen grain structure
+            width: The width of the bicrystal supercell to set grain in
+            height: The height of the bicrystal supercell to set grain in
+            depth: The depth of the bicrystal supercell to set grain in
+            set_in: The position (top/bottom) to set grain in bicrystal supercell
 
         Returns:
             A pymatgen grain structure set into a bicrystal supercell
@@ -272,10 +272,10 @@ class TopGrain(Slab):
 
         chiseled = atomObj.copy()
         pos = chiseled.get_positions()
-        pos -= np.min(pos,axis=0)   
-        chiseled.set_positions(pos) 
+        pos -= np.min(pos,axis=0)
+        chiseled.set_positions(pos)
         inidx = np.all(np.logical_and(pos>=[0,0,0],pos<[width,height,depth]),axis=1)
-        
+
         del pos
         del chiseled[np.logical_not(inidx)]
 
@@ -286,11 +286,11 @@ class TopGrain(Slab):
         # print(np.max(pos[:,1]))
         # print(up_shift)
         pos[:,1] = pos[:,1]+up_shift
-        chiseled.set_positions(pos) 
-        
+        chiseled.set_positions(pos)
+
         # Reset the cell so it is big enough to eventually accomodate a second grain
-        chiseled.set_cell([width,2*height,depth]) 
-        
+        chiseled.set_cell([width,2*height,depth])
+
         # Remove structure conflicts at width and depth boundaries as a result of imperfect PBC
         pmg = AseAtomsAdaptor.get_structure(chiseled)
         s = pmg.copy()
@@ -327,7 +327,7 @@ class TopGrain(Slab):
 class BottomGrain(Slab):
     def __init__(self, chemical_formula, space_group, uvw_project, uvw_upward, tilt_angle, max_dimension,flip_species=False):
         super().__init__(chemical_formula, space_group, uvw_project, uvw_upward, tilt_angle, max_dimension)
-        
+
         self.height = max_dimension
         self.structure = self.set_in_bicrystal(flip_species=flip_species)
 
@@ -336,11 +336,11 @@ class BottomGrain(Slab):
         Given grains, find the proper width/depth dimensions
 
         Args:
-            pymatgen_structure: The input pymatgen grain structure 
-            width: The width of the bicrystal supercell to set grain in 
-            height: The height of the bicrystal supercell to set grain in 
-            depth: The depth of the bicrystal supercell to set grain in 
-            set_in: The position (top/bottom) to set grain in bicrystal supercell 
+            pymatgen_structure: The input pymatgen grain structure
+            width: The width of the bicrystal supercell to set grain in
+            height: The height of the bicrystal supercell to set grain in
+            depth: The depth of the bicrystal supercell to set grain in
+            set_in: The position (top/bottom) to set grain in bicrystal supercell
 
         Returns:
             A pymatgen grain structure set into a bicrystal supercell
@@ -351,23 +351,23 @@ class BottomGrain(Slab):
 
         chiseled = atomObj.copy()
         pos = chiseled.get_positions()
-        pos -= np.min(pos,axis=0)   
-        chiseled.set_positions(pos) 
+        pos -= np.min(pos,axis=0)
+        chiseled.set_positions(pos)
         inidx = np.all(np.logical_and(pos>=[0,0,0],pos<[width,height,depth]),axis=1)
-        
+
         del pos
         del chiseled[np.logical_not(inidx)]
-        
+
         # Set grain so that max pos[:,1] is at the interface
         pos = chiseled.get_positions()
         pos[:,1] = pos[:,1] - np.min(pos[:,1])+1E-10
         up_shift = ((2*height)- 1E-10)/2 - np.max(pos[:,1])
         pos[:,1] = pos[:,1]+up_shift
-        chiseled.set_positions(pos) 
+        chiseled.set_positions(pos)
 
         # Reset the cell so it is big enough to eventually accomodate a second grain
-        chiseled.set_cell([width,2*height,depth]) 
-        
+        chiseled.set_cell([width,2*height,depth])
+
         # Remove structure conflicts at width and depth boundaries as a result of imperfect PBC
         pmg = AseAtomsAdaptor.get_structure(chiseled)
         s = pmg.copy()

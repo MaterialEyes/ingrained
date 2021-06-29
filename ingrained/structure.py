@@ -35,36 +35,36 @@ class PartialCharge(object):
     def __init__(self, config_file=""):
         """
         Initialize a PartialCharge object with the path to a PARCHG file.
-                 
+
         Args:
             config_file: (string) path to a PARCHG file
-        """  
+        """
         self.config_file = config_file
-        self.parchg = Chgcar.from_file(config_file) 
-        
-        # Actual volumetric charge data from PARCHG 
-        self.chgdata = self.parchg.data['total'] 
-        
+        self.parchg = Chgcar.from_file(config_file)
+
+        # Actual volumetric charge data from PARCHG
+        self.chgdata = self.parchg.data['total']
+
         # Structure associated w/ volumetric data
-        self.structure = self.parchg.structure     
-        
+        self.structure = self.parchg.structure
+
         # Fraction of cell occupied by structure
-        self.zmax = self.structure.cart_coords[:, 2].max()/self.structure.lattice.c 
-        
+        self.zmax = self.structure.cart_coords[:, 2].max()/self.structure.lattice.c
+
         # Get the real space sizes assocated with each voxel in volumetric data
         self.lwh = ( self.structure.lattice.a/self.parchg.dim[0] , \
                      self.structure.lattice.b/self.parchg.dim[1] , \
                      self.structure.lattice.c/self.parchg.dim[2] )
-        
+
         # Image fields
         self.cell  = None
         self.image = None
         self.sim_params = None
-        
+
     def _get_stm_vol(self, z_below="", z_above=""):
-        """        
+        """
         Get the volumetric slab associated with the input depths.
-        
+
         Args:
             z_below: (float) thickness or depth from top in Angstroms
             z_above: (float) distance above the surface to consider
@@ -74,7 +74,7 @@ class PartialCharge(object):
             Indice of the top slice (in reference to full slab)
         """
         if self._parameter_check_z(z_below=z_below, z_above=z_above):
-            
+
             # Get fractional coordinates for z_below and z_above
             z_below /= self.structure.lattice.c
             z_above /= self.structure.lattice.c
@@ -86,18 +86,18 @@ class PartialCharge(object):
             # Get volumetric slice (nzmin:nzmax,nrows,ncols) from charge data
             rhos  = np.swapaxes(np.swapaxes(self.chgdata.copy(),0,2),1,2)[nzmin:nzmax,:,:]/self.structure.volume
             return rhos, nzmax
-    
+
 
     def _shift_sites(self):
         """
-        Translate all coordinates such that the maximum of the 
+        Translate all coordinates such that the maximum of the
         maximum of the charge density is around the center
         of the cell.
         """
 
-    
+
         # Translate atomic positions so zmax is in the center of the cell
-        
+
         self.structure.translate_sites(indices=range(self.structure.num_sites), \
                     vector=[0,0,self.structure.lattice.c*(.5-self.zmax)], \
                                   frac_coords=False)
@@ -118,22 +118,22 @@ class PartialCharge(object):
                      new_dat[i].append(np.concatenate((dat_slice[zmax_index+int(ngzf/2):],
                                      dat_slice[:zmax_index],
                                      dat_slice[zmax_index:zmax_index+int(ngzf/2)])))
- 
-                    
+
+
         self.chgdata = new_dat
         self.zmax = self.structure.cart_coords[:, 2].max()/ \
-                        self.structure.lattice.c 
+                        self.structure.lattice.c
 
         self.structure.to('POSCAR','POSCAR_centered')
-    
+
     def _get_stm_cell(self, z_below="", z_above="", r_val="", r_tol=""):
         """
-        Calculate a single STM image cell from DFT-simulation. 
-        
-        NOTE: Skew in the volumetric grid due to non-orthogonal lattice vectors 
+        Calculate a single STM image cell from DFT-simulation.
+
+        NOTE: Skew in the volumetric grid due to non-orthogonal lattice vectors
         in the imaging plane is NOT accounted for in the creation of the image_cell.
         Use get_stm_image (wrapper) to return an image that contains the proper skew!
-        
+
         Args:
             z_below: (float) thickness or depth from top in Angstroms
             z_above: (float) distance above the surface to consider
@@ -142,14 +142,14 @@ class PartialCharge(object):
 
         Returns:
             A numpy array (np.float64) of the simulated image tile.
-            
+
         Credit: Chaitanya Kolluru
         """
-        # Get volumetric slab corresponding to z_below and z_above parameters        
+        # Get volumetric slab corresponding to z_below and z_above parameters
         rhos, nzmax = self._get_stm_vol(z_below=z_below, z_above=z_above)
-            
+
         if self._parameter_check_r(r_val=r_val, r_tol=r_tol, rhos=rhos):
-            
+
             # If absdiff between charge density value and r_val not is not within r_tol, switch pixels to off (i.e. -9E9)
             rhos[abs(rhos - r_val) >= r_tol] = -9E9
 
@@ -170,11 +170,11 @@ class PartialCharge(object):
 
             self.cell = image
             return image
-    
+
     def simulate_image(self, sim_params=[]):
         """
         Calculate a full displayable STM image from DFT-simulation.
-        
+
         Args:
             sim_params: (list) specifying the following simulation parameters
               - z_below: (float) thickness or depth from top in (Å)
@@ -190,16 +190,16 @@ class PartialCharge(object):
               - sigma: (float) standard deviation for gaussian kernel used in postprocessing
               - crop_height: (int) final (cropped) image height in pixels
               - crop_width: (int) final (cropped) image width in pixels
-        
+
         Returns:
-            A numpy array (np.float64) of the full simulated image. 
+            A numpy array (np.float64) of the full simulated image.
         """
-        # Enforce max stretch/squeeze and max/min shear value (both directions 0.30)        
-        sim_params[4] = sorted((-0.50, sim_params[4], 0.50))[1]
-        sim_params[5] = sorted((-0.50, sim_params[5], 0.50))[1]
-        sim_params[6] = sorted((-0.50, sim_params[6], 0.50))[1]
-        sim_params[7] = sorted((-0.50, sim_params[7], 0.50))[1]        
-        
+        # Enforce max stretch/squeeze and max/min shear value (both directions 0.30)
+        sim_params[4] = 0 #sorted((-0.50, sim_params[4], 0.50))[1]
+        sim_params[5] = 0 #sorted((-0.50, sim_params[5], 0.50))[1]
+        sim_params[6] = 0 #sorted((-0.50, sim_params[6], 0.50))[1]
+        sim_params[7] = 0 #sorted((-0.50, sim_params[7], 0.50))[1]
+
         # Clamps the given pixel size to a range between 0.05 and 0.40 (Å)
         sim_params[8] = sorted((-360, sim_params[8], 360))[1]
 
@@ -207,7 +207,7 @@ class PartialCharge(object):
         sim_params[9] = sorted((0.05, sim_params[9], 0.40))[1]
 
         # Clamps the given sigma value to a range between 0 and 10
-        sim_params[10] = sorted((0, sim_params[10], 10))[1]
+        sim_params[10] = 0 #sorted((0, sim_params[10], 10))[1]
         # sim_params[10] = 0 # In case we want to get rid of blur completely
 
         # Simulate the image cell
@@ -215,14 +215,14 @@ class PartialCharge(object):
 
         # Construct a larger cell by repeating image_cell in both directions, NREPS = 8
         img_tiled = np.tile(self.cell,(16,16))
-        
+
         # Add shear to account for a non-orthogonal unit cell (if necessary)
-        img_tiled = self._apply_lattice_shear(img_tiled)  
+        img_tiled = self._apply_lattice_shear(img_tiled)
 
         # Resize image based on pixel_size
         img_tiled = iop.apply_resize(img_tiled, np.array([int(a) for a in np.shape(img_tiled) * np.array(self.lwh[::-1][1::]) * (1./sim_params[9])]))
 
-        # Rotate tiled image according to rotation value   
+        # Rotate tiled image according to rotation value
         img_tiled = iop.apply_rotation(img_tiled, sim_params[8])
 
         # Apply any specified postprocessing shear
@@ -236,79 +236,79 @@ class PartialCharge(object):
             # Enforce odd sizes on width and length of cropped image (min_length = 25, max_length = current length)
             sim_params[-1] = sorted((37,int(2 * np.floor(sim_params[-1]/2) + 1),int(2 * np.floor((np.shape(img_tiled)[1]-2)/2) + 1)))[1]
             sim_params[-2] = sorted((37,int(2 * np.floor(sim_params[-2]/2) + 1),int(2 * np.floor((np.shape(img_tiled)[0]-2)/2) + 1)))[1]
-            
+
             # Apply crop to image
             img_tiled = iop.apply_crop(img_tiled,sim_params[-1],sim_params[-2])
 
             # Apply gaussian blur
-            image = iop.apply_blur(img_tiled, sigma=sim_params[10])       
+            image = iop.apply_blur(img_tiled, sigma=sim_params[10])
 
             # If sucessful, record parameters!
             self.sim_params = sim_params
             self.image = image
             return image, None
-    
-    def simulate_image_random(self, rotation="", pix_size="", crop_height="", crop_width=""): 
+
+    def simulate_image_random(self, rotation="", pix_size="", crop_height="", crop_width=""):
         """
         Randomly simulate a valid image.
-        
+
         Args:
             rotation: (float) image rotation angle (in degrees CCW)
             pix_size: (float) real-space edge length of a single pixel (in Å)
             crop_height: (int) final (cropped) image height in pixels
             crop_width: (int) final (cropped) image width in pixels
-        
+
         Returns:
             A numpy array (np.float64) of the full simulated image.
         """
         sim_params = self._random_initialize(rotation=rotation, pix_size=pix_size, crop_height=crop_height, crop_width=crop_width)
         img_rand, __ = self.simulate_image(sim_params)
         return img_rand
-    
+
     def _random_initialize(self, rotation="", pix_size="", crop_height="", crop_width=""):
         """
         Randomly select a set of parameters to simulate a valid image
-        
+
         Args:
             rotation: (float) image rotation angle (in degrees CCW)
             pix_size: (float) real-space edge length of a single pixel (in Å)
             crop_height: (int) final (cropped) image height in pixels
             crop_width: (int) final (cropped) image width in pixels
-        
+
         Returns:
             A numpy array of sim_params (tuple) specifying the necessary simulation parameters for 'simulate_image'
         """
         slab_thickness = self.structure.cart_coords[:, 2].max() - self.structure.cart_coords[:, 2].min()
-        
+
         z_below = random.uniform(-1+1E-10,(0.5*slab_thickness)-1E-10)
         z_above = random.uniform(0,(1 - self.zmax) * self.structure.lattice.c)
-            
+
         rhos, __ = self._get_stm_vol(z_below=z_below, z_above=z_above)
-        
+
         r_val = random.uniform((rhos.max()/3)+1E-10, (rhos.max())-1E-10)
         r_tol = random.uniform(0.0001+1E-10,(0.999*r_val)-1E-10)
-        
+
         x_shear  = random.uniform(-0.3,0.3)
-        y_shear  = random.uniform(-0.3,0.3) 
+        y_shear  = random.uniform(-0.3,0.3)
         x_stretch  = random.uniform(-0.3,0.3)
         y_stretch  = random.uniform(-0.3,0.3)
-        
+
         sigma = random.uniform(0,4)
 
         if rotation != "":
             rotation = (rotation + random.choice(list(range(-360,360,90))) + random.uniform(-2,2))%360
         else:
             rotation = random.choice(list(range(-360,360,1)))
-            
+
         if pix_size != "":
             pix_size = pix_size + random.uniform(-0.015,0.015)
         else:
             pix_size = random.uniform(0.05,0.40)
-            
+
         if crop_width == "":
-            crop_height = crop_width = int(2 * np.floor(random.uniform(33,121)/2) + 1)    
+            crop_height = crop_width = int(2 * np.floor(random.uniform(33,121)/2) + 1)
         return [z_below, z_above, r_val, r_tol, x_shear, y_shear, x_stretch, y_stretch, rotation, pix_size, sigma, crop_height, crop_width]
-    
+
     def _image_size_check(self, img):
         """
         """
@@ -322,40 +322,40 @@ class PartialCharge(object):
     def _parameter_check_z(self, z_below="", z_above=""):
         """
         Validate choice of depth parameters to ensure feasibility of STM image calculation
-        
+
         Args:
             z_below: (float) thickness or depth from top in Angstroms
             z_above: (float) distance above the surface to consider
-            
+
         Returns:
             A boolean (pass or fail)
         """
         slab_thickness = self.structure.cart_coords[:, 2].max() - self.structure.cart_coords[:, 2].min()
 
         # Check to make sure zbelow is within valid depth range (in Angstroms)
-        if -1 <= z_below <= min([0.5*slab_thickness,4]):
+        if -1 <= z_below <= min([0.5*slab_thickness,2]):
             pass
         else:
-            raise Exception("ParameterError: z_below = {0} outside valid range [{1} to {2:.5}]".format(z_below,-1,min([0.5*slab_thickness,4])))
-                
+            raise Exception("ParameterError: z_below = {0} outside valid range [{1} to {2:.5}]".format(z_below,-1,min([0.5*slab_thickness,2])))
+
         # Check to make sure z_above is within bounds of structure (within close proximity to surface, specifically)
-        if 0 < z_above <= ((1 - self.zmax) * 0.5 * self.structure.lattice.c):
+        if 1 < z_above <= ((1 - self.zmax) * self.structure.lattice.c) - 2:
             pass
         else:
-            raise Exception("ParameterError: z_above = {0} outside structure (must be <= {1:.5})".format(z_above,((1 - self.zmax) * 0.5 * self.structure.lattice.c)))
+            raise Exception("ParameterError: z_above = {0} outside structure (must be <= {1:.5})".format(z_above,((1 - self.zmax) * self.structure.lattice.c)) - 2)
         return True
-    
+
     def _parameter_check_r(self, r_val="", r_tol="", rhos=""):
         """
         Validate choice of charge density parameters to ensure feasibility of STM image calculation
-        
+
         Args:
             r_val: (float) isosurface charge density plane
             r_tol: (float) tolerance to consider while determining isosurface
             rhos: (numpy array) the volumetric charge density slab
-            
+
         Returns:
-            A boolean (pass or fail) 
+            A boolean (pass or fail)
         """
         # Check to make sure r_val is within valid isosurface (rmax/3 to rmax)
         if rhos.max()/3 < r_val <  rhos.max():
@@ -369,23 +369,23 @@ class PartialCharge(object):
         else:
             raise Exception("ParameterError: r_tol = {0} outside valid range ({1:.5} to {2:.5})".format(r_tol,0.0001,0.999*r_val))
         return True
-        
+
     def _apply_lattice_shear(self, img):
         """
-        Apply centered shear of volumetric grid along lattice vectors. 
+        Apply centered shear of volumetric grid along lattice vectors.
 
         Args:
-            img: (numpy array) 
-            
+            img: (numpy array)
+
         Returns:
             A square numpy array (np.float64) of the sheared image.
-             
-        NOTE: This function has limited use cases. Add more for robust handling! Currently assumes "a" 
-              lattice vector in x-direction and "b" lattice vector resolves into x and y components. 
+
+        NOTE: This function has limited use cases. Add more for robust handling! Currently assumes "a"
+              lattice vector in x-direction and "b" lattice vector resolves into x and y components.
         """
         # Get lattice vector a and b
         lva, lvb = self.parchg.structure.lattice.matrix[0], self.parchg.structure.lattice.matrix[1]
-        
+
         # Use count of nonzero entries as method to detect vectors resolved along multiple directions
         if np.count_nonzero(lvb) == 1 and np.count_nonzero(lva) == 1:
             x_sh = 0
@@ -395,15 +395,15 @@ class PartialCharge(object):
             y_sh = 0
         else:
             raise Exception('Shear detected, but not accounted for in image formed from volumetric grid!')
-        return iop.apply_shear(img, x_sh, y_sh)  
-    
+        return iop.apply_shear(img, x_sh, y_sh)
+
     def simulation_summary(self, iter="", verbose=False):
         """
         Write the parameter summary to screen (or config_file).
-        
+
         Args:
             config_file: (string) name of the write file
-            
+
         Returns:
             None
         """
@@ -414,7 +414,7 @@ class PartialCharge(object):
         • (r_val, r_tol)            :  {2}
         • (x, y) shear (frac)       :  {3}
         • (x, y) stretch (frac)     :  {4}
-        • sigma  (Gaussian blur)    :  {5}  
+        • sigma  (Gaussian blur)    :  {5}
         • rotation (deg CCW)        :  {6}
         • pix_size (Å)              :  {7}
         • img_size (pixels)         :  {8}""".format(iter,(z_below, z_above),(r_val, r_tol),(x_shear, y_shear),(x_stretch, y_stretch),sigma,rotation,pix_size,(crop_height,crop_width))
@@ -422,7 +422,7 @@ class PartialCharge(object):
             print(summary)
         else:
             return summary
-                
+
     def display(self):
         """
         Display the simulated STM image.
@@ -433,17 +433,17 @@ class PartialCharge(object):
 
 class Bicrystal(object):
     """
-    This class contains two oriented supercell slabs prepared from structure queries to the Materials Project, 
-    as well as a calculator to fuse the slabs together into a bicrystal, simulate a convolution HAADF STEM image, 
+    This class contains two oriented supercell slabs prepared from structure queries to the Materials Project,
+    as well as a calculator to fuse the slabs together into a bicrystal, simulate a convolution HAADF STEM image,
     and perform postprocessing imaging manipulations.
     """
     def __init__(self, config_file="", write_poscar=False, poscar_file=""):
         """
         Initialize a Bicrystal object with the path to a bicrystal slabs (json) file.
-                 
+
         Args:
             config_file: (string) path to a bicrystal slabs file
-        """  
+        """
 
         if poscar_file != "":
             poscar = Poscar.from_file(poscar_file)
@@ -456,7 +456,7 @@ class Bicrystal(object):
 
             self.slab_1 = slab["slab_1"]
             self.slab_2 = slab["slab_2"]
-            
+
             # Copy simulation folder from install directory to cwd
             try:
                 shutil.copytree(os.path.dirname(__file__)+'/simulation', os.getcwd()+'/simulation')
@@ -472,15 +472,15 @@ class Bicrystal(object):
                                      self.slab_1['uvw_project'], self.slab_1['uvw_upward'],\
                                      self.slab_1['tilt_angle'], self.slab_1['max_dimension'],\
                                      self.slab_1['flip_species'])
-                
+
                 # Actual structure for the bottom grain (slab positioned into bottom of bicrystal cell)
                 bot_grain = BottomGrain(self.slab_2["chemical_formula"], self.slab_2["space_group"],\
                                      self.slab_2['uvw_project'], self.slab_2['uvw_upward'],\
                                      self.slab_2['tilt_angle'], self.slab_2['max_dimension'],\
-                                     self.slab_2['flip_species'])         
-            
+                                     self.slab_2['flip_species'])
+
                 structure, top_grain_fit, bot_grain_fit, strain_info = self._get_base_structure(top_grain, bot_grain, constraints)
-                
+
                 self.top_grain = top_grain_fit
                 self.bot_grain = bot_grain_fit
                 self.structure = structure
@@ -503,7 +503,7 @@ class Bicrystal(object):
         # self.cell, __  = self._get_image_cell()
         # self.image = None
         # self.sim_params = None
-        
+
         # self.lw = (self.structure.lattice.b/np.shape(self.cell)[1],
         #            self.structure.lattice.c/np.shape(self.cell)[0])
 
@@ -518,33 +518,33 @@ class Bicrystal(object):
     def _get_base_structure(self, top_grain_structure, bot_grain_structure, constraints):
         """
         Take grains and fuse them into a simple bicrystal, subject to input constraints
-        
-        Args:
-            top_grain_structure (): an ingrained.contruct.TopGrain() object
-            bot_grain_structure (): an ingrained.contruct.BottomGrain() object
-            constraints (dict): dictionary of geometric constraints for bicrystal construction
-        
-        Returns:
-            The basic fused bicrystal (pymatgen structure) w/ corresponding ingrained.contruct.TopGrain() 
-            and ingrained.contruct.BottomGrain() objects after average expand/contract values applied
-        """
-        structure, top_grain, bot_grain, strain_info= self._fuse_grains(top_grain_structure, bot_grain_structure, constraints)
-        structure = self._adjust_interface_width(structure=structure, interface_width_1=constraints['interface_1_width'], interface_width_2=constraints['interface_2_width'])
-        structure = self._remove_interface_collisions(structure=structure, collision_removal_1=constraints['collision_removal'][0], collision_removal_2=constraints['collision_removal'][1])
-    
-        return structure, top_grain, bot_grain, strain_info
-    
-    def _fuse_grains(self, top_grain_structure, bot_grain_structure, constraints):
-        """
-        Take current grain structures and expand/contract in width/depth to minimize strain 
-        between grains and assign same width/depth computed as the average of the ideal 
-        expand/contract values for each grain. 
 
         Args:
             top_grain_structure (): an ingrained.contruct.TopGrain() object
             bot_grain_structure (): an ingrained.contruct.BottomGrain() object
             constraints (dict): dictionary of geometric constraints for bicrystal construction
-            
+
+        Returns:
+            The basic fused bicrystal (pymatgen structure) w/ corresponding ingrained.contruct.TopGrain()
+            and ingrained.contruct.BottomGrain() objects after average expand/contract values applied
+        """
+        structure, top_grain, bot_grain, strain_info= self._fuse_grains(top_grain_structure, bot_grain_structure, constraints)
+        structure = self._adjust_interface_width(structure=structure, interface_width_1=constraints['interface_1_width'], interface_width_2=constraints['interface_2_width'])
+        structure = self._remove_interface_collisions(structure=structure, collision_removal_1=constraints['collision_removal'][0], collision_removal_2=constraints['collision_removal'][1])
+
+        return structure, top_grain, bot_grain, strain_info
+
+    def _fuse_grains(self, top_grain_structure, bot_grain_structure, constraints):
+        """
+        Take current grain structures and expand/contract in width/depth to minimize strain
+        between grains and assign same width/depth computed as the average of the ideal
+        expand/contract values for each grain.
+
+        Args:
+            top_grain_structure (): an ingrained.contruct.TopGrain() object
+            bot_grain_structure (): an ingrained.contruct.BottomGrain() object
+            constraints (dict): dictionary of geometric constraints for bicrystal construction
+
         Return:
             A bicrystal (pymatgen structure) from fusion of top and bottom grains
         """
@@ -557,8 +557,8 @@ class Bicrystal(object):
         # Apply appropriate integer expansions to grain structures
         top_grain_structure.structure.make_supercell([top_n_width,1,top_n_depth])
         bot_grain_structure.structure.make_supercell([bot_n_width,1,bot_n_depth])
-        
-        # Get expanded width/depth values of the grains 
+
+        # Get expanded width/depth values of the grains
         widths = [top_grain_structure.structure.lattice.a,bot_grain_structure.structure.lattice.a]
         depths = [top_grain_structure.structure.lattice.c,bot_grain_structure.structure.lattice.c]
 
@@ -578,32 +578,32 @@ class Bicrystal(object):
         bot_grain = AseAtomsAdaptor.get_atoms(bot_grain_structure.structure)
 
         # Strain to coincidence
-        top_grain.set_cell([width_bc,height_bc,depth_bc],scale_atoms=True) 
+        top_grain.set_cell([width_bc,height_bc,depth_bc],scale_atoms=True)
         bot_grain.set_cell([width_bc,height_bc,depth_bc],scale_atoms=True)
 
-        # Set bottom grain as the gb structure 
+        # Set bottom grain as the gb structure
         gb_full = bot_grain.copy()
-        
+
         # Get chemical symbols and positions for top grain
         top_grain_sym = top_grain.get_chemical_symbols()
         top_grain_pos = top_grain.get_positions()
-            
-        # Insert top_grain info into gb structure (on top of the exisiting 'bottom' structure)    
+
+        # Insert top_grain info into gb structure (on top of the exisiting 'bottom' structure)
         for i in range(len(top_grain_sym)):
             gb_full.append(Atom(top_grain_sym[i],top_grain_pos[i]))
 
         # Get positions, cell information and shuffle axes
         gb_pos = gb_full.get_positions()
         gb_abc = gb_full.get_cell_lengths_and_angles()[0:3]
-        gb_full.set_positions(np.vstack([np.vstack([gb_pos[:,2],gb_pos[:,0]]),gb_pos[:,1]]).T) 
+        gb_full.set_positions(np.vstack([np.vstack([gb_pos[:,2],gb_pos[:,0]]),gb_pos[:,1]]).T)
         gb_full.set_cell([gb_abc[2],gb_abc[0],gb_abc[1]])
-        
+
         # Convert back to pymatgen structure and resolve any boundary conflicts
         gb_full_structure = AseAtomsAdaptor.get_structure(gb_full)
         gb_full_structure = self._enforce_pb(gb_full_structure)
         gb_full_structure = self._resolve_pb_conflicts(gb_full_structure)
         return gb_full_structure, top_grain_structure, bot_grain_structure, [strain_top_width,strain_top_depth,strain_bot_width,strain_bot_depth]
-    
+
     def _adjust_interface_width(self, structure="", interface_width_1=0, interface_width_2=0):
         """
         Adjust spacing between both interfaces between grains, with option to remove collision conflicts
@@ -615,9 +615,9 @@ class Bicrystal(object):
 
         Return:
             A bicrystal (pymatgen structure) that reflects specified interface widths
-        """   
-        # Get copy of current structure  
-        bc = structure.copy()   
+        """
+        # Get copy of current structure
+        bc = structure.copy()
         if interface_width_1 != 0:
             # Update atom coordinate positions based on modified length in the c-direction from interface_width_1
             new_crds, new_spec = [], []
@@ -628,112 +628,112 @@ class Bicrystal(object):
                 else:
                     new_crds.append([cx/bc.lattice.a,cy/bc.lattice.b,cz/(bc.lattice.c+interface_width_1)])
                 new_spec.append(str(bc.species[idx]).split('Element')[0])
-            
+
             # Create new 'Lattice' from parameters and a new pymatgen 'Structure' with updated positions
             lattice = Lattice.from_parameters(a=bc.lattice.a, b=bc.lattice.b, c=(bc.lattice.c+interface_width_1), alpha=90, beta=90, gamma=90)
             new_struct_1 = Structure(lattice, new_spec, new_crds)
 
             # Get copy of current structure with atom positions
             bc = new_struct_1.copy()
-        
+
         if interface_width_2 != 0:
             crds = bc.cart_coords
             # Shift all coords up half distance of interface_width_2
             crds[:,2] = (crds[:,2]-np.min(crds[:,2])) + interface_width_2/2
-                    
+
             # Update atom coordinate positions based on modified length in the c-direction from interface_width_2
             new_crds, new_spec = [], []
             for idx in range(len(bc)):
                 cx,cy,cz = crds[idx]
                 new_crds.append([cx/bc.lattice.a,cy/bc.lattice.b,cz/(np.max(crds[:,2]) + interface_width_2/2)])
                 new_spec.append(str(bc.species[idx]).split('Element')[0])
-            
+
             # Create new 'Lattice' from parameters and a new pymatgen 'Structure' with updated positions
             lattice = Lattice.from_parameters(a=bc.lattice.a, b=bc.lattice.b, c=(np.max(crds[:,2]) + interface_width_2/2), alpha=90, beta=90, gamma=90)
             new_struct_2 = Structure(lattice, new_spec, new_crds)
-        
+
             # Get copy of current structure with atom positions
             bc = new_struct_2.copy()
-        return bc      
-            
+        return bc
+
     def _remove_interface_collisions(self, structure="", collision_removal_1=False, collision_removal_2=False, collision_distance=1):
         """
         Remove atoms at the interface that are within 'collision_distance' of another atom,
         starting removal with atoms at the bottom of the interface region
-        
+
         Args:
             structure (pymatgen structure): bicrystal structure
             collision_removal_1 (boolean): remove atoms within 'collision_distance' in volume around interface_1
             collision_removal_2 (boolean): remove atoms within 'collision_distance' in volume around interface_2
             collision_distance (float): atoms less than or equal to this distance are considered collisions
-        
+
         Return:
             A bicrystal (pymatgen structure) with collisions removed within the interface volumes
         """
         # Get copy of current structure
         bc = structure.copy()
-        
+
         # Interface 1 collision removal
         if collision_removal_1:
-            
+
             # Get all atomic coordinates
             pos = bc.cart_coords
-            
+
             # Define region surrounding interface where we check for conflict (3Å region)
             iw_zone = ((bc.lattice.c/2)-1.5,(bc.lattice.c/2)+1.5)
-            
+
             # Retrieve all coordinates belonging to the iw_zone
             interface_coords = pos[np.where((pos[:,2]>=iw_zone[0]) & (pos[:,2]<=iw_zone[1]))]
-            
+
             # Ensure they are sorted such that lower coordinates are tested first
             interface_coords = interface_coords[interface_coords[:,2].argsort()]
-            
+
             for coord in interface_coords:
                 # Get array of distances between coord and coords of current structure
                 dist_check = distance_matrix([coord], bc.cart_coords)[0]
-                
+
                 # If an atom is within collision_distance, remove!
                 if np.sum(dist_check <= collision_distance) > 1:
                     indx = list(dist_check).index(0)
-                    bc.remove_sites([indx])    
-            
+                    bc.remove_sites([indx])
+
         # Interface 2 collision removal
         if collision_removal_2:
-            
+
             # Get all atomic coordinates
             pos = bc.cart_coords
-            
+
             # Define region surrounding interface where we check for conflict (3Å region)
             iw_zone = (0,1.5)
-            
+
             # Retrieve all coordinates belonging to the iw_zone
             interface_coords = pos[np.where((pos[:,2]>=iw_zone[0]) & (pos[:,2]<=iw_zone[1]))]
-            
+
             # Ensure they are sorted such that lower coordinates are tested first
             interface_coords = interface_coords[interface_coords[:,2].argsort()]
-            
+
             for coord in interface_coords:
                 # Move coordinate across PBC to check for conflict
                 coord[2] = coord[2]+bc.lattice.c
-                
+
                 # Get array of distances between coord and coords of current structure
                 dist_check = distance_matrix([coord], bc.cart_coords)[0]
-                
+
                 # If an atom is within collision_distance, remove!
                 if np.sum(dist_check <= collision_distance) > 1:
                     indx = list(dist_check).index(0)
-                    bc.remove_sites([indx])  
+                    bc.remove_sites([indx])
         return bc
-    
-    def _get_image_cell(self, defocus=1, interface_width=0, pix_size=0.15, view=False):       
+
+    def _get_image_cell(self, defocus=1, interface_width=0, pix_size=0.15, view=False):
         """
-        Calculate a single HAADF STEM image cell from bicrystal structure. 
-    
+        Calculate a single HAADF STEM image cell from bicrystal structure.
+
         Args:
             defocus: (float) controls degree to which edges blur in microscopy image (Å)
             interface_width: (float) spacing b/w max pos of bottom_grain and min pos of top grain (Å)
             pix_size: (float) real-space pixel size (Å)
-            view: (boolean) option to display cell after simulation 
+            view: (boolean) option to display cell after simulation
 
         Returns:
             A numpy array (np.float64) of the simulated image tile.
@@ -741,15 +741,15 @@ class Bicrystal(object):
         """
 
         # Get copy of current structure
-        bc =self.structure.copy() 
-        
+        bc =self.structure.copy()
+
         # Apply additional interface width adjustments (on top of interface_1_width which is set during initialization)
         bc = self._adjust_interface_width(structure=bc, interface_width_1=interface_width)
         bc = self._remove_interface_collisions(structure=bc, collision_removal_1=True)
 
-        # Use pixel_size to define shape of the output image 
+        # Use pixel_size to define shape of the output image
         pixx, pixy = np.round(np.array(bc.lattice.abc)/pix_size)[1::].astype(np.int)
-        
+
         fmt = '% 4d', '% 8.4f', '% 9.4f', '% 9.4f', '% 4.2f', '% 4.3f'
         # Write input structure file required for Kirkland STEM simulation
         with open(os.getcwd()+'/simulation/SAMPLE.XYZ', "w") as sf:
@@ -771,9 +771,9 @@ class Bicrystal(object):
 
         # Write parameter file required for Kirkland STEM simulation
         with open(os.getcwd()+'/simulation/params.txt', "w") as pf:
-            pf.write('SAMPLE.XYZ\n1 1 1\nSAMPLE.TIF\n'+str(pixx)+" "+str(pixy)+"\n")            
-            pf.write("200 0 0 0 30\n100 150\nEND\n"+str(defocus)+"\n0")             
-        
+            pf.write('SAMPLE.XYZ\n1 1 1\nSAMPLE.TIF\n'+str(pixx)+" "+str(pixy)+"\n")
+            pf.write("200 0 0 0 30\n100 150\nEND\n"+str(defocus)+"\n0")
+
         # Simulate image with Kirkland incostem
         with cd(os.getcwd()+'/simulation'):
             subprocess.call("./incostem-osx", stdout=subprocess.PIPE)
@@ -792,11 +792,11 @@ class Bicrystal(object):
         self.lw = (bc.lattice.b/np.shape(image)[1],bc.lattice.c/np.shape(image)[0])
 
         return image, bc
-        
+
     def simulate_image(self, sim_params=[]):
         """
         Calculate a full displayable STM image from DFT-simulation.
-        
+
         Args:
             sim_params: (list) specifying the following simulation parameters
               - pix_size: (float) real-space pixel size (Å)
@@ -808,9 +808,9 @@ class Bicrystal(object):
               - y_stretch: (float) fractional amt stretch (+) or compression (-) in y
               - crop_height: (int) final (cropped) image height in pixels
               - crop_width: (int) final (cropped) image width in pixels
-              
+
         Returns:
-            A numpy array (np.float64) of the full simulated image. 
+            A numpy array (np.float64) of the full simulated image.
         """
         # Clamps the given pixel size to a range
         if self.pix_size != None:
@@ -819,13 +819,13 @@ class Bicrystal(object):
             # sim_params[0] = sorted((0.1, sim_params[0], 0.4))[1]
             sim_params[0] = sorted((0.05, sim_params[0], 0.4))[1]
 
-        # Clamp the interface_width to a range between -2 and 2 (Å)     
+        # Clamp the interface_width to a range between -2 and 2 (Å)
         sim_params[1] = sorted((-2, sim_params[1], 2))[1]
-        
-        # Clamp the defocus to a range between 0.5 and 1.75 (Å)     
+
+        # Clamp the defocus to a range between 0.5 and 1.75 (Å)
         sim_params[2] = sorted((0.5, sim_params[2], 1.75))[1]
 
-        # Enforce max stretch/squeeze and max/min shear value (both directions 0.20)        
+        # Enforce max stretch/squeeze and max/min shear value (both directions 0.20)
         sim_params[3] = sorted((-0.20, sim_params[3], 0.20))[1]
         sim_params[4] = sorted((-0.20, sim_params[4], 0.20))[1]
         sim_params[5] = sorted((-0.20, sim_params[5], 0.20))[1]
@@ -834,9 +834,9 @@ class Bicrystal(object):
         # Simulate the image cell
         old_struct = self.structure.copy()
         # print(self.lw)
-        
+
         img_cell, new_struct = self._get_image_cell(defocus=sim_params[2], interface_width=sim_params[1], pix_size=sim_params[0], view=False)
-        
+
         # if new_struct == old_struct:
         #     print("No modifications were made to the structure!")
         # else:
@@ -846,7 +846,7 @@ class Bicrystal(object):
 
         # Construct a larger cell by repeating image_cell in both directions
         img_tiled = np.tile(img_cell,(1,4))
-        
+
         # Resize image based on pixel_size
         img_tiled = iop.apply_resize(img_tiled, np.array([int(a) for a in np.shape(img_tiled) * np.array(self.lw[::-1]) * (1./sim_params[0])]))
 
@@ -859,40 +859,40 @@ class Bicrystal(object):
         # Enforce odd sizes on width and length of cropped image (min_length = 25, max_length = current length)
         sim_params[-1] = sorted((35,int(2 * np.floor(sim_params[-1]/2) + 1),int(2 * np.floor((np.shape(img_tiled)[1]-2)/2) + 1)))[1]
         sim_params[-2] = sorted((35,int(2 * np.floor(sim_params[-2]/2) + 1),int(2 * np.floor((np.shape(img_tiled)[0]-2)/2) + 1)))[1]
-        
+
         # Apply crop to image
-        image = iop.apply_crop(img_tiled,sim_params[-1],sim_params[-2])   
+        image = iop.apply_crop(img_tiled,sim_params[-1],sim_params[-2])
 
         # If sucessful, record parameters!
         self.sim_params = sim_params
         self.image = image
-        return image, new_struct   
-       
-    def simulate_image_random(self, pix_size="", crop_height="", crop_width=""): 
+        return image, new_struct
+
+    def simulate_image_random(self, pix_size="", crop_height="", crop_width=""):
         """
         Randomly simulate a valid image.
-        
+
         Args:
             pix_size: (float) real-space edge length of a single pixel (in Å)
             crop_height: (int) final (cropped) image height in pixels
             crop_width: (int) final (cropped) image width in pixels
-        
+
         Returns:
             A numpy array (np.float64) of the full simulated image.
         """
         sim_params = self._random_initialize(pix_size=pix_size, crop_height=crop_height, crop_width=crop_width)
         img_rand, __ = self.simulate_image(sim_params)
         return img_rand
-    
+
     def _random_initialize(self, pix_size="", crop_height="", crop_width=""):
         """
         Randomly select a set of parameters to simulate a valid image
-        
+
         Args:
             pix_size: (float) real-space edge length of a single pixel (in Å)
             crop_height: (int) final (cropped) image height in pixels
             crop_width: (int) final (cropped) image width in pixels
-        
+
         Returns:
             A numpy array of sim_params (tuple) specifying the necessary simulation parameters for 'simulate_image'
         """
@@ -901,15 +901,15 @@ class Bicrystal(object):
         defocus = random.uniform(0.5+(1E-10),1.75-(1E-10))
 
         x_shear  = random.uniform(-0.1,0.1)
-        y_shear  = random.uniform(-0.1,0.1) 
+        y_shear  = random.uniform(-0.1,0.1)
         x_stretch  = random.uniform(-0.1,0.1)
         y_stretch  = random.uniform(-0.1,0.1)
-            
+
         if pix_size != "":
             pix_size = pix_size + random.uniform(-0.015,0.015)
         else:
             pix_size = random.uniform(0.05,0.40)
-            
+
         if crop_width == "":
             if crop_height != "":
                 crop_width = int(random.uniform(0.80,1.2)*crop_height)
@@ -923,11 +923,11 @@ class Bicrystal(object):
                 crop_height = int(random.uniform(75,201))
 
         return [pix_size, interface_width, defocus, x_shear, y_shear, x_stretch, y_stretch, crop_height, crop_width]
-    
+
     @staticmethod
     def _find_optimal_expansion(x, y, min_len=5, max_len=100):
         """
-        Given two floats, x and y, return integers a and b such that 
+        Given two floats, x and y, return integers a and b such that
         |ax - by| ≈ 0 subject to min/max constraints
 
         Args:
@@ -937,23 +937,23 @@ class Bicrystal(object):
             max_length: max value of an approximate multiple
 
         Returns:
-            Smallest integers that best approximate the objective 
+            Smallest integers that best approximate the objective
         """
         alist = [x*i for i in range(1,100) if x*i < max_len and x*i > min_len]
         blist = [y*i for i in range(1,100) if y*i < max_len and y*i > min_len]
         dmat = distance.cdist(np.array(alist).reshape(-1,1),np.array(blist).reshape(-1,1),'euclidean')
         result = min((min((v, c) for c, v in enumerate(row)), r) for r, row in enumerate(dmat))
         return int(alist[result[1]]/x), int(blist[result[0][1]]/y), np.min(dmat)
-    
+
     @staticmethod
     def _enforce_pb(pymatgen_structure):
         """
-        Wrap atoms that have fixed coords outside cell back to their coord in cell. 
+        Wrap atoms that have fixed coords outside cell back to their coord in cell.
         Notice this sometimes happens when using AseAtomsAdaptor.get_structure() to convert ASE to pymatgen
-        
+
         Args:
             pymatgen_structure
-                
+
         Returns:
             pymatgen_structure
         """
@@ -961,15 +961,15 @@ class Bicrystal(object):
         for i in range(len(s.frac_coords)):
             s[i] = s[i].specie, [s[i].frac_coords[0]%1, s[i].frac_coords[1]%1, s[i].frac_coords[2]%1]
         return s
-    
+
     @staticmethod
     def _resolve_pb_conflicts(pymatgen_structure):
         """
         If atoms near the 0 bound (width or depth only) interfere w/ atoms @ max bounds w/ PBC's, delete them!
-        
+
         Args:
             pymatgen_structure
-        
+
         Returns:
             pymatgen_structure
         """
@@ -990,14 +990,14 @@ class Bicrystal(object):
             i+=1
         s.remove_sites(indel)
         return s
-    
+
     def simulation_summary(self, iter="", verbose=False):
         """
         Write the parameter summary to screen (or config_file).
-        
+
         Args:
             config_file: (string) name of the write file
-            
+
         Returns:
             None
         """
