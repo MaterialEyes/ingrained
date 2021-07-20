@@ -171,7 +171,7 @@ class PartialCharge(object):
             self.cell = image
             return image
     
-    def simulate_image(self, sim_params=[]):
+    def simulate_image(self, sim_params=[],fix_params=[]):
         """
         Calculate a full displayable STM image from DFT-simulation.
         
@@ -190,25 +190,22 @@ class PartialCharge(object):
               - sigma: (float) standard deviation for gaussian kernel used in postprocessing
               - crop_height: (int) final (cropped) image height in pixels
               - crop_width: (int) final (cropped) image width in pixels
+            fix_params: list of variables in "sim_params' to keep fixed
         
         Returns:
             A numpy array (np.float64) of the full simulated image. 
         """
-        # Enforce max stretch/squeeze and max/min shear value (both directions 0.30)        
+        # Enforce max stretch/squeeze and max/min shear value (both directions 0.30)  
         sim_params[4] = sorted((-0.50, sim_params[4], 0.50))[1]
         sim_params[5] = sorted((-0.50, sim_params[5], 0.50))[1]
         sim_params[6] = sorted((-0.50, sim_params[6], 0.50))[1]
         sim_params[7] = sorted((-0.50, sim_params[7], 0.50))[1]        
-        
-        # Clamps the given pixel size to a range between 0.05 and 0.40 (Å)
+        # Clamps the rotation between -2pi and 2pi
         sim_params[8] = sorted((-360, sim_params[8], 360))[1]
-
         # Clamps the given pixel size to a range between 0.05 and 0.40 (Å)
         sim_params[9] = sorted((0.05, sim_params[9], 0.40))[1]
-
         # Clamps the given sigma value to a range between 0 and 10
         sim_params[10] = sorted((0, sim_params[10], 10))[1]
-        # sim_params[10] = 0 # In case we want to get rid of blur completely
 
         # Simulate the image cell
         self._get_stm_cell(z_below=sim_params[0], z_above=sim_params[1], r_val=sim_params[2], r_tol=sim_params[3])
@@ -234,9 +231,13 @@ class PartialCharge(object):
         if self._image_size_check(img=img_tiled):
 
             # Enforce odd sizes on width and length of cropped image (min_length = 25, max_length = current length)
-            sim_params[-1] = sorted((37,int(2 * np.floor(sim_params[-1]/2) + 1),int(2 * np.floor((np.shape(img_tiled)[1]-2)/2) + 1)))[1]
-            sim_params[-2] = sorted((37,int(2 * np.floor(sim_params[-2]/2) + 1),int(2 * np.floor((np.shape(img_tiled)[0]-2)/2) + 1)))[1]
-            
+            sim_params[-2] = sorted((37, \
+                       int(2 * np.floor(sim_params[-2]/2) + 1),\
+                       int(2 * np.floor((np.shape(img_tiled)[0]-2)/2) + 1)))[1]
+            sim_params[-1] = sorted((37, \
+                       int(2 * np.floor(sim_params[-1]/2) + 1),\
+                       int(2 * np.floor((np.shape(img_tiled)[1]-2)/2) + 1)))[1]
+
             # Apply crop to image
             img_tiled = iop.apply_crop(img_tiled,sim_params[-1],sim_params[-2])
 

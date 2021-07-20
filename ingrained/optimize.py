@@ -22,7 +22,7 @@ class CongruityBuilder(object):
     - where d_TC(𝜃) is the taxicab distance required for optimal cross-correlation-based 
       registration after upsampling (enforces consistency in the pattern across boundaries)
 
-    - where d_SSIM(𝜃) is the Structural Similarity Index Measure, which quantifies the visual 
+    - where d_SSIM(𝜃) is the Structural Similarity Index Measure, which quantifies the visual 
       similarity between the simulation and experiment patch (enforces visual consistency in 
       the content within the patches)
 
@@ -41,12 +41,13 @@ class CongruityBuilder(object):
         self.exp_img = exp_img
         self.iter    = iter
         
-    def fit(self, sim_params = [], display=False, bias_x=0.0, bias_y=0.0):
+    def fit(self, sim_params = [],fix_params=[], display=False, bias_x=0.0, bias_y=0.0):
         """
         Find optimal correspondence between simulation and experiment for the specified parameters.
 
         Args:
             sim_params: (list) parameters required for the 'simulate_image' method in the sim_obj
+            fix_params: (list) parameters in "sim_params" to keep fixed
             display: (string) plt.show() for intermediate/final fit results 
             bias_x: (float) reduce search area in the x-direction by a fraction
             bias_y: (float) reduce search area in the y-direction by a fraction
@@ -56,7 +57,9 @@ class CongruityBuilder(object):
             coodinates of the center pixel in the experiment
         """ 
         # Simulate an image using specified parameters
-        sim_img, sim_struct = self.sim_obj.simulate_image(sim_params=sim_params)
+        sim_img, sim_struct = self.sim_obj.simulate_image(\
+                                                sim_params=sim_params,
+                                                fix_params=fix_params)
         
         # Display simulated image
         # self.sim_obj.display()
@@ -378,7 +381,7 @@ class CongruityBuilder(object):
         plt.savefig(savename,dpi=400)
         plt.close()
 
-    def taxicab_ssim_objective(self,x):
+    def taxicab_ssim_objective(self,x,fixed):
         """
         Objective function used to quantify how well a given set of input imaging paramters, x, 
         produce an image that can be arranged in such a way inside the experimental image that minimizes 
@@ -389,7 +392,7 @@ class CongruityBuilder(object):
             - where d_TC(𝜃) is the taxicab distance required for optimal cross-correlation-based 
               registration after upsampling (enforces consistency in the pattern across boundaries)
 
-            - where d_SSIM(𝜃) is the Structural Similarity Index Measure, which quantifies the visual 
+            - where d_SSIM(𝜃) is the Structural Similarity Index Measure, which quantifies the visual 
               similarity between the simulation and experiment patch (enforces visual consistency in 
               the content within the patches)
               
@@ -399,15 +402,31 @@ class CongruityBuilder(object):
         Returns:
             The objective function value (refered to as the the "figure-of-merit" value).
         """
-        xfit = [a for a in x[:-2]] + [int(a) for a in x[-2::]]
+        # Get list of variables that are to be kept constant
+        constants=fixed[0][0]
+        # Convert list of constants into dictionary
+        reord_vars={}
+        for i in constants:
+            reord_vars[i]=fixed[0][constants.index(i)+1]
+        # Add variables to dictionary
+        counter=0
+        for i in range(13):
+            if i not in constants:
+                reord_vars[i]=x[counter]
+                counter+=1
+        # Convert dictionary to correctly ordered list
+        xfit = [reord_vars[i] for i in range(13)]
+        #xfit = [a for a in x[:-2]] + [int(a) for a in x[-2::]]
+        #fixed=fixed[0]
         try:
-            sim_img, sim_struct, exp_patch, shift_score, __ = self.fit(xfit, display=False);
+            sim_img, sim_struct, exp_patch, shift_score, __ = \
+                                    self.fit(xfit,fixed, display=False)
         except Exception as e: 
             print(e)
             sim_img = None
         
         if sim_img is not None:
-            match_ssim = iop.score_ssim(sim_img, exp_patch, win_size=35)
+            match_ssim = iop.score_ssim(sim_img, exp_patch)
             fom = 0.1*(shift_score)+match_ssim
         else:
             fom = 9999
@@ -431,7 +450,7 @@ class CongruityBuilder(object):
             - where d_TC(𝜃) is the taxicab distance required for optimal cross-correlation-based 
               registration after upsampling (enforces consistency in the pattern across boundaries)
 
-            - where d_SSIM(𝜃) is the Structural Similarity Index Measure, which quantifies the visual 
+            - where d_SSIM(𝜃) is the Structural Similarity Index Measure, which quantifies the visual 
               similarity between the simulation and experiment patch (enforces visual consistency in 
               the content within the patches)
               
@@ -451,7 +470,7 @@ class CongruityBuilder(object):
             sim_img = None
 
         if sim_img is not None:
-            match_ssim = iop.score_ssim(sim_img, exp_patch, win_size=35)
+            match_ssim = iop.score_ssim(sim_img, exp_patch)
             fom = 0.1*(shift_score)+match_ssim
         else:
             fom = 9999
@@ -464,7 +483,7 @@ class CongruityBuilder(object):
         self.iter += 1
         return fom
 
-    def find_correspondence(self,objective='taxicab_ssim', optimizer='Powell', initial_solution="", search_mode="stm"):
+    def find_correspondence(self,objective='taxicab_ssim', optimizer='Powell', initial_solution="",fixed_params=[()], search_mode="stm"):
         """
         Wrapper around scipy.optimize.minimize solvers, to find optimal correspondence between simulation and experiment 
         by minimizing taxicab_ssim_objective.
@@ -507,7 +526,7 @@ class CongruityBuilder(object):
             
             if optimizer == 'Powell':
                 if objective  == "taxicab_ssim":
-                    return minimize(self.taxicab_ssim_objective, initial_solution, method='Powell',tol=1E-6,options={'disp': True})
+                    return minimize(self.taxicab_ssim_objective, initial_solution, args=fixed_params, method='Powell',tol=1E-6,options={'disp': True})
 
         elif search_mode == 'gb':
             if optimizer == 'COBYLA':
