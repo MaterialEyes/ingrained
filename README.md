@@ -7,41 +7,90 @@
 Grain boundary structure initialization from atomic-resolution HAADF STEM imaging ([CdTe [110]-[110] tilt grain boundary](https://aip.scitation.org/doi/10.1063/1.5123169))
 
 <img src="https://drive.google.com/uc?export=view&id=1UpoiBue9R7rgBNWvk584Ozc85luHSY7Y" alt="alt text" width="704" height="260">
-  
+
 STM structure validation from simulated images of partial charge densities volumes from DFT-simulation ([Cu<sub>2</sub>O(111)](https://pubs.rsc.org/en/content/articlelanding/2018/cp/c8cp06023a#!divAbstract))
 
 <img src="https://drive.google.com/uc?export=view&id=1C46_e0WO0ajaQ_ON_EWi9tZeL_RNjcJ8" alt="alt text" width="704" height="260">
 
 
 ## Getting started
-  
+
 ### Requirements
 To install *ingrained*, you need:
-  * python 3.x 
+  * python 3.x
   * a conda package manager to configure the basic installation environment
   * [Materials Project API key](https://materialsproject.org/open)
 
 ### Installation
-The following will install a local copy of *ingrained* and create a custom [conda](https://docs.conda.io/en/latest/) development environment for both STEM and STM functionalities.
+It is recommended to start installation on a new conda environment using Anaconda.
 
-Clone this repo and navigate to the root directory:
+Load Anaconda if available as a library
 ```sh
-git clone https://github.com/MaterialEyes/ingrained
-cd ingrained
+module load conda
 ```
-Create the environment from the <code>environment.yml</code> file and activate it:
+Or in some systems, Anaconda comes with python module. So
 ```sh
-conda env create -f utils/environment.yml
-conda activate ingrained
+module load python
 ```
+
+If above methods fail, download Anaconda for the system [here](https://docs.conda.io/en/latest/miniconda.html). Follow default instructions and install Anaconda. Restart the terminal so that the installation takes effect.
+
+Update conda and add conda-forge to the Anaconda channels & set higher priority. Skip this step if conda-forge is already added before. Install everything from conda-forge to be consistent & reduce compatibility issues across different pacakges.
+```sh
+conda update -n base -c defaults conda
+conda config --add channels conda-forge
+```
+
+Create a new conda environment with path. Provide *path* to the new conda environment. Add the new environment (*fantastx*) to the system path. Install python 3.
+
+```sh
+conda create -yp ~/miniconda3/envs/ingrained
+conda activate ~/miniconda3/envs/ingrained
+export PATH=~/miniconda3/envs/ingrained/bin:$PATH
+conda install python=3
+```
+
+Install Pymatgen (Installs Numpy, Scipy, Matplotlib) with pip instead of conda.
+
+```sh
+pip install pymatgen
+```
+
+Get latest ingrained from github
+```sh
+git clone https://github.com/MaterialEyes/ingrained.git
+```
+
+Change branch to dev_ch (for the following installation)
+```sh
+git checkout dev_ch
+```
+
 Set your [Materials Project API key](https://materialsproject.org/open) "MAPI_KEY" environment variable:
-```python
+```sh
 ./utils/set_key.sh mYaPiKeY
 ```
-Install additional (external) packages to parse standard experimental files (i.e. dm3, sxm, etc...)
+
+Install *pydm3* and *pySPM* readers (for .dm3 and .sxm files) with the following script
 ```sh
 ./utils/install_parsers.sh
 ```
+
+Install ase
+```sh
+pip install --upgrade --user ase
+```
+
+Add the local bin (path) to sys
+```sh
+export PATH=~/.local/bin:$PATH
+```
+
+Install using python setup.py file with *develop* option. This approach allows installation of Ingrained in already existing conda environments as well. (For example, when using with Fantastx)
+```sh
+python setup.py develop
+```
+
 ## *ingrained* workflow
 1. Isolate a clean region of an experimental image, and preprocess if necessary (*i.e. Wiener filter, contrast enhancement, etc.*)
 2. Initialize a *structure* object from an appropriate classes in [structure.py](https://github.com/MaterialEyes/ingrained/blob/master/ingrained/structure.py). For grain boundaries, a <code>Bicrystal()</code> object requires a path to a configuration file, <code>config.json</code>. For STM structure validation, a <code>PartialCharge()</code> object requires a path to a <code>PARCHG</code> file.
@@ -54,7 +103,7 @@ The [clean_templates](https://github.com/MaterialEyes/ingrained/tree/master/exam
 
 ### Ex. 1: Grain boundary structure initialization from HAADF STEM
 
-Here, we outline the contents of the [example](https://github.com/MaterialEyes/ingrained/tree/master/examples/completed_runs/gb/CdTe_110_CdTe_110_tilt) given for a [CdTe [110]-[110] tilt grain boundary](https://aip.scitation.org/doi/10.1063/1.5123169) structure 
+Here, we outline the contents of the [example](https://github.com/MaterialEyes/ingrained/tree/master/examples/completed_runs/gb/CdTe_110_CdTe_110_tilt) given for a [CdTe [110]-[110] tilt grain boundary](https://aip.scitation.org/doi/10.1063/1.5123169) structure
 
 (1) Experimental target image ([HAADF149.dm3](https://github.com/MaterialEyes/ingrained/blob/master/examples/completed_runs/gb/CdTe_110_CdTe_110_tilt/HAADF149.dm3)).
 
@@ -179,7 +228,7 @@ Here, we outline the contents of the [example](https://github.com/MaterialEyes/i
 
 This file will need to be downloaded, as it is not stored in the repo.
 ```sh
-bash parchg_download.sh 
+bash parchg_download.sh
 ```
 
 (3) Python script to execute steps of the *ingrained* workflow ([run.py]()).
@@ -245,9 +294,9 @@ Summary of optimization parameters:
 
 (4) Python script for final relaxation of <code>z_above</code> parameter ([relax_z_above.py](https://github.com/MaterialEyes/ingrained/tree/master/examples/completed_runs/stm/Cu2O_111/relax_z_above.py))
 
-Run only after <code>find_correspondence</code> has completed. Currently, <code>z_above</code> acts as a free variable 
-once it exceeds the top of the charge surface, and optimization may make this value arbitarily high when the best solution 
-is at the top of the surface. This function ensures that <code>z_above</code> represents a physically meaningful distance 
+Run only after <code>find_correspondence</code> has completed. Currently, <code>z_above</code> acts as a free variable
+once it exceeds the top of the charge surface, and optimization may make this value arbitarily high when the best solution
+is at the top of the surface. This function ensures that <code>z_above</code> represents a physically meaningful distance
 (Å) above the surface.
 
 ### Output
@@ -257,7 +306,7 @@ Execution of the sequence outlined in [run.py]() will produce:
  * [strain_info.txt](https://github.com/MaterialEyes/ingrained/blob/master/examples/completed_runs/gb/CdTe_110_CdTe_110_tilt/strain_info) - (Ex. 1 only) record of the amount of strain in each bicrystal grain (given as % along width and depth)
  * [progress.txt](https://github.com/MaterialEyes/ingrained/blob/master/examples/completed_runs/gb/CdTe_110_CdTe_110_tilt/progress.txt) - record of the optimization solution and the respective figure-of-merit (FOM) at each optimization step.
 
-Additional tools are included to view and write optimization progress to a movie 
+Additional tools are included to view and write optimization progress to a movie
 * [print_frames.py](https://github.com/MaterialEyes/ingrained/blob/master/examples/completed_runs/gb/CdTe_110_CdTe_110_tilt/print_frames.py) - writes specified optimization steps (frames) to custom image panels (.png)
 * [make_movie.sh](https://github.com/MaterialEyes/ingrained/blob/master/examples/completed_runs/gb/CdTe_110_CdTe_110_tilt/make_movie.sh) - wrapper around [FFmpeg](https://ffmpeg.org/) to create a movie from the sequence of panels created in [print_frames.py](https://github.com/MaterialEyes/ingrained/blob/master/examples/completed_runs/gb/CdTe_110_CdTe_110_tilt/print_frames.py)
 
