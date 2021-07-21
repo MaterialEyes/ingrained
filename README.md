@@ -22,7 +22,7 @@ To install *ingrained*, you need:
   * [Materials Project API key](https://materialsproject.org/open)
 
 ### Installation
-It is recommended to start installation on a new conda environment using Anaconda.
+It is recommended to start installation on a new conda environment using Anaconda. However, if needed to install Ingrained in an existing conda environment, skip this step and proceed to next step.
 
 Load Anaconda if available as a library
 ```sh
@@ -48,6 +48,11 @@ conda create -yp ~/miniconda3/envs/ingrained
 conda activate ~/miniconda3/envs/ingrained
 export PATH=~/miniconda3/envs/ingrained/bin:$PATH
 conda install python=3
+```
+
+For installation in an existing conda environment, skip the above steps and start from here by activating the existing conda environment.
+```sh
+conda activate <existing_conda_env>
 ```
 
 Install Pymatgen (Installs Numpy, Scipy, Matplotlib) with pip instead of conda.
