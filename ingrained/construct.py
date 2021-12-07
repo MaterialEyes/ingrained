@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from scipy.spatial import KDTree, Delaunay, distance_matrix
 
 # pymatgen tools
-from pymatgen import MPRester
+from pymatgen.ext.matproj import MPRester
 from pymatgen.io.xyz import XYZ
 from pymatgen.io.ase import AseAtomsAdaptor
 from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
@@ -283,8 +283,6 @@ class TopGrain(Slab):
         pos = chiseled.get_positions()
         pos[:,1] = pos[:,1] - np.min(pos[:,1])+1E-10
         up_shift = ((2*height)- 1E-10)/2
-        # print(np.max(pos[:,1]))
-        # print(up_shift)
         pos[:,1] = pos[:,1]+up_shift
         chiseled.set_positions(pos) 
         
