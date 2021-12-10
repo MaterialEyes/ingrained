@@ -218,6 +218,27 @@ def print_frames(config_file="", poscar_file="", exp_img="", exp_title="", progr
     time.sleep(1)
     Printer("")
 
+
+def heights(start_pix=[0,0],end_pix=[1,1],savename='heights.png'):
+    """
+    Plot the height at each pixel between two pixel values
+    args:
+        start_pix (array): Starting pixel for plot
+        end_pix   (array): End pixel for plot
+        savename (string): Name to give file
+    """
+    
+    heights=[]
+    for i in range(int(min([end_pix[0]-start_pix[0],end_pix[1]-start_pix[1]]))+1):
+        i/=int(min([end_pix[0]-start_pix[0],end_pix[1]-start_pix[1]]))
+        new_pix = [int((end_pix[0]-start_pix[0])*i),int((end_pix[1]-start_pix[1])*i)]
+        heights.append(sim_img[start_pix[0]+new_pix[0]][start_pix[1]+new_pix[1]])
+    heights = np.array(heights)-min(heights)
+    plt.plot(heights)
+    plt.title('Max Height Difference = '+str(round(max(heights),3))+' $\AA$')
+    plt.savefig('heights.pdf',bbox_inches='tight')
+
+
 def prepare_fantastx_input(config_file="",poscar_file="", exp_img="", progress_file=""):
 
     
