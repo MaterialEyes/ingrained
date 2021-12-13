@@ -266,14 +266,10 @@ class PartialCharge(object):
 
 
             # Apply gaussian blur
-            #image = iop.apply_blur(img_tiled, sigma=sim_params[10])
-            image = iop.apply_blur(img_tiled, sigma=sim_params[10])
+            img_tiled = iop.apply_blur(img_tiled, sigma=sim_params[10])
 
             # Apply crop to image
-            image = iop.apply_crop(image,sim_params[-1],sim_params[-2])
-            
-            #img_tiled = iop.apply_crop(img_tiled,sim_params[-1],sim_params[-2])
-            print('STILL GOING')
+            image = iop.apply_crop(img_tiled,sim_params[-1],sim_params[-2])
 
             # If sucessful, record parameters!
             self.sim_params = sim_params
