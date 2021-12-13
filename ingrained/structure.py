@@ -93,10 +93,11 @@ class PartialCharge(object):
             return rhos, nzmax
     
 
-    def _shift_sites(self):
+    def _shift_sites(self,write_struct=False):
         """
         Translate all coordinates such that the maximum of the 
-        charge density is around the center of the cell.
+        charge density is around the center of the cell. May neeed
+        to be performed twice.
         """
 
     
@@ -131,7 +132,9 @@ class PartialCharge(object):
         self.zmax = self.structure.cart_coords[:, 2].max()/ \
                         self.structure.lattice.c 
 
-        self.structure.to('POSCAR','POSCAR_centered')
+        # Write structure to ensure no confusion
+        if write_struct:
+            self.structure.to('POSCAR','POSCAR_centered')
     
     def _get_stm_cell(self, z_below="", z_above="", r_val="", r_tol=""):
         """
@@ -181,6 +184,7 @@ class PartialCharge(object):
 
             self.cell = image
             return image
+
     
     def simulate_image(self, sim_params=[],fix_params=[]):
         """
@@ -260,11 +264,16 @@ class PartialCharge(object):
                        int(2 * np.floor(sim_params[-1]/2) + 1),\
                        int(2 * np.floor((np.shape(img_tiled)[1]-2)/2) + 1)))[1]
 
-            # Apply crop to image
-            img_tiled = iop.apply_crop(img_tiled,sim_params[-1],sim_params[-2])
 
             # Apply gaussian blur
-            image = iop.apply_blur(img_tiled, sigma=sim_params[10])       
+            #image = iop.apply_blur(img_tiled, sigma=sim_params[10])
+            image = iop.apply_blur(img_tiled, sigma=sim_params[10])
+
+            # Apply crop to image
+            image = iop.apply_crop(image,sim_params[-1],sim_params[-2])
+            
+            #img_tiled = iop.apply_crop(img_tiled,sim_params[-1],sim_params[-2])
+            print('STILL GOING')
 
             # If sucessful, record parameters!
             self.sim_params = sim_params
@@ -531,22 +540,22 @@ class Bicrystal(object):
             if "structure_file" not in slab:
                 # Actual structure for the top grain 
                 # (slab positioned into top of bicrystal cell)
-                top_grain = TopGrain(self.slab_1["chemical_formula"],\
-                                     self.slab_1["space_group"],\
-                                     self.slab_1['uvw_project'],\
-                                     self.slab_1['uvw_upward'],\
-                                     self.slab_1['tilt_angle'],\
-                                     self.slab_1['max_dimension'],\
+                top_grain = TopGrain(self.slab_1["chemical_formula"],
+                                     self.slab_1["space_group"],
+                                     self.slab_1['uvw_project'],
+                                     self.slab_1['uvw_upward'],
+                                     self.slab_1['tilt_angle'],
+                                     self.slab_1['max_dimension'],
                                      self.slab_1['flip_species'])
                 
                 # Actual structure for the bottom grain 
                 # (slab positioned into bottom of bicrystal cell)
-                bot_grain = BottomGrain(self.slab_2["chemical_formula"],\
-                                        self.slab_2["space_group"],\
-                                        self.slab_2['uvw_project'],\
-                                        self.slab_2['uvw_upward'],\
-                                        self.slab_2['tilt_angle'],\
-                                        self.slab_2['max_dimension'],\
+                bot_grain = BottomGrain(self.slab_2["chemical_formula"],
+                                        self.slab_2["space_group"],
+                                        self.slab_2['uvw_project'],
+                                        self.slab_2['uvw_upward'],
+                                        self.slab_2['tilt_angle'],
+                                        self.slab_2['max_dimension'],
                                         self.slab_2['flip_species'])         
             
                 structure, top_grain_fit, bot_grain_fit, strain_info = \
@@ -1018,7 +1027,8 @@ class Bicrystal(object):
         # Apply any specified postprocessing strech/squeeze
         img_tiled = iop.apply_stretch(img_tiled, sim_params[5], sim_params[6])
 
-        # Enforce odd sizes on width and length of cropped image (min_length = 25, max_length = current length)
+        # Enforce odd sizes on width and length of cropped image (min_length = 
+        # 25, max_length = current length)
         sim_params[-1] = sorted((35,int(2 * np.floor(sim_params[-1]/2) + 1),
                                   int(2 * np.floor((np.shape(img_tiled)[1]-2)/\
                                                                    2) + 1)))[1]
