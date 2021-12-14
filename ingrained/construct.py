@@ -150,6 +150,73 @@ class Slab(object):
 
         return AseAtomsAdaptor.get_structure(atom)
 
+    def filter_atoms(position, select_idx, direction):
+        """
+        Helper function for "get_repeat_dist"
+        
+        Args:
+            position (list): List of atomic positions
+            select_idx (int): selection index for outer loop
+            direction (str): Which direction to filter atoms
+        
+        Returns:
+            list of positions
+        """
+        if direction == 'width':
+            # Filter out atoms that have same a
+            position_filt = np.array([a for a in position if a[0] != \
+                                                      position[select_idx][0]])
+            # Filter out atoms that are not at same width (has tolerance)
+            position_filt = np.array([a for a in position_filt if np.abs(a[1]-\
+                                               position[select_idx][1]) < 1.0])
+            # Filter out atoms that are not at same height (has tolerance)
+            position_filt = np.array([a for a in position_filt if np.abs(a[2]-\
+                                               position[select_idx][2]) < 1.0])
+        elif direction == 'depth': 
+            # Filter out atoms that have same c
+            position_filt = np.array([a for a in position if a[2] != \
+                                                      position[select_idx][2]])
+            # Filter out atoms that are not at same width (has tolerance)
+            position_filt = np.array([a for a in position_filt if np.abs(a[1]-\
+                                               position[select_idx][1]) < 0.2])
+            # Filter out atoms that are not at same height (has tolerance)
+            position_filt = np.array([a for a in position_filt if np.abs(a[0]-\
+                                               position[select_idx][0]) < 0.2])
+
+        return(position_filt)
+    def filter_check(position, position_filt, select_idx, direction):
+        """
+        Helper function for get_repeat_dist
+        
+        Args:
+            position (list): List of atomic positions
+            position_filt (list): List of filtered atomic positions
+            select_idx (int): selection index for outer loop
+            direction (str): Which direction to filter atoms
+        
+            
+        
+        """
+        
+        if position_filt != []:
+            if direction=='width':
+                # Find index of closest_b (not in column)
+                cb_idx = np.argmin(np.abs(position_filt[:,1]-position[select_idx][1]))
+                # Compute "a" distance to closest proxy atom
+                adis = np.round(np.abs(position[select_idx][0]-position_filt[cb_idx][0]),4)
+                # Compute "b" tolerance to closest proxy atom
+                btol = np.round(np.abs((position_filt[cb_idx][1]-position[select_idx][1])),4)
+
+            elif direction=='height':
+                # Find index of closest_b (not in column)
+                cb_idx = np.argmin(np.abs(position_filt[:,1]-position[select_idx][1]))
+                # Compute "a" distance to closest proxy atom
+                adis = np.round(np.abs(position[select_idx][2]-position_filt[cb_idx][2]),4)
+                # Compute "b" tolerance to closest proxy atom
+                btol = np.round(np.abs((position_filt[cb_idx][1]-position[select_idx][1])),4)
+ 
+        return(adis,btol)
+
     def get_repeat_dist(self,direction="width",mode="tol"):
         """
         Find the approximate length needed for one full repeat of the structure along width or depth. 
@@ -171,37 +238,16 @@ class Slab(object):
         dtol = []
         for element in chemical_symbols:
             # Get all indices of 
-            indices = [int(i) for i, elem in enumerate(chemical_symbols_list) if element in elem]
+            indices = [int(i) for i, elem in enumerate(chemical_symbols_list) \
+                                                            if element in elem]
             position = np.array([positions_list[idx] for idx in indices])                     
-            for select_idx in range(np.shape(position)[0]):           
-                if direction == 'width':
-                    # Filter out atoms that have same a
-                    position_filt = np.array([a for a in position if a[0] != position[select_idx][0]])
-                    # Filter out atoms that are not at same width (has tolerance)
-                    position_filt = np.array([a for a in position_filt if np.abs(a[1] - position[select_idx][1]) < 1.0])
-                    # Filter out atoms that are not at same height (has tolerance)
-                    position_filt = np.array([a for a in position_filt if np.abs(a[2] - position[select_idx][2]) < 1.0])
-                    if position_filt != []:
-                        # Find index of closest_b (not in column)
-                        cb_idx = np.argmin(np.abs(position_filt[:,1]-position[select_idx][1]))
-                        # Compute "a" distance to closest proxy atom
-                        adis = np.round(np.abs(position[select_idx][0]-position_filt[cb_idx][0]),4)
-                        # Compute "b" tolerance to closest proxy atom
-                        btol = np.round(np.abs((position_filt[cb_idx][1]-position[select_idx][1])),4)
-                elif direction == 'depth': 
-                    # Filter out atoms that have same c
-                    position_filt = np.array([a for a in position if a[2] != position[select_idx][2]])
-                    # Filter out atoms that are not at same width (has tolerance)
-                    position_filt = np.array([a for a in position_filt if np.abs(a[1] - position[select_idx][1]) < 0.2])
-                    # Filter out atoms that are not at same height (has tolerance)
-                    position_filt = np.array([a for a in position_filt if np.abs(a[0] - position[select_idx][0]) < 0.2])
-                    if position_filt != []:
-                        # Find index of closest_b (not in column)
-                        cb_idx = np.argmin(np.abs(position_filt[:,1]-position[select_idx][1]))
-                        # Compute "a" distance to closest proxy atom
-                        adis = np.round(np.abs(position[select_idx][2]-position_filt[cb_idx][2]),4)
-                        # Compute "b" tolerance to closest proxy atom
-                        btol = np.round(np.abs((position_filt[cb_idx][1]-position[select_idx][1])),4)
+            for select_idx in range(np.shape(position)[0]): 
+                position_filt = filter_atoms(position,select_idx,direction)
+                adis, btol = filter_check(position,
+                                          position_filt,
+                                          select_idx,
+                                          direction)
+ 
                 try:
                     if (adis,btol) not in dtol:
                         dtol.append((adis,btol,element))
@@ -213,7 +259,8 @@ class Slab(object):
             for element in chemical_symbols:
                 dtol_elem = [a for a in dtol if a[2] == element]
                 min_tol = np.min(np.array([a[1] for a in dtol_elem]))
-                idx = np.argmin(np.array([a[0] for a in dtol_elem if a[1] == min_tol]))
+                idx = np.argmin(np.array([a[0] for a in dtol_elem if \
+                                                             a[1] == min_tol]))
                 elem_tols.append(dtol_elem[idx])
 
         critical_idx = np.argmax(np.array([a[0] for a in elem_tols]))
@@ -232,9 +279,9 @@ class Slab(object):
         Test if points in `p` are in `hull`
 
         `p` should be a `NxK` coordinates of `N` points in `K` dimensions
-        `hull` is either a scipy.spatial.Delaunay object or the `MxK` array of the 
-        coordinates of `M` points in `K`dimensions for which Delaunay triangulation
-        will be computed
+        `hull` is either a scipy.spatial.Delaunay object or the `MxK` array 
+        of the coordinates of `M` points in `K`dimensions for which 
+        Delaunay triangulation will be computed
         """
         if not isinstance(hull,Delaunay):
             hull = Delaunay(hull)
@@ -243,7 +290,9 @@ class Slab(object):
 
     @staticmethod
     def _centroid_coordinates(crds):
-        return np.sum(crds[:, 0])/crds.shape[0], np.sum(crds[:, 1])/crds.shape[0], np.sum(crds[:, 2])/crds.shape[0]
+        return np.sum(crds[:, 0])/crds.shape[0], \
+               np.sum(crds[:, 1])/crds.shape[0], \
+               np.sum(crds[:, 2])/crds.shape[0]
 
 class TopGrain(Slab):
     def __init__(self, chemical_formula, space_group, uvw_project, uvw_upward, tilt_angle, max_dimension, flip_species=False):
@@ -261,7 +310,8 @@ class TopGrain(Slab):
             width: The width of the bicrystal supercell to set grain in 
             height: The height of the bicrystal supercell to set grain in 
             depth: The depth of the bicrystal supercell to set grain in 
-            set_in: The position (top/bottom) to set grain in bicrystal supercell 
+            set_in: The position (top/bottom) to set grain in bicrystal 
+                    supercell 
 
         Returns:
             A pymatgen grain structure set into a bicrystal supercell
@@ -274,7 +324,9 @@ class TopGrain(Slab):
         pos = chiseled.get_positions()
         pos -= np.min(pos,axis=0)   
         chiseled.set_positions(pos) 
-        inidx = np.all(np.logical_and(pos>=[0,0,0],pos<[width,height,depth]),axis=1)
+        inidx = np.all(np.logical_and(pos>=[0,0,0],
+                                      pos<[width,height,depth]),
+                                      axis=1)
         
         del pos
         del chiseled[np.logical_not(inidx)]
@@ -286,10 +338,12 @@ class TopGrain(Slab):
         pos[:,1] = pos[:,1]+up_shift
         chiseled.set_positions(pos) 
         
-        # Reset the cell so it is big enough to eventually accomodate a second grain
+        # Reset the cell so it is big enough to eventually 
+        # accomodate a second grain
         chiseled.set_cell([width,2*height,depth]) 
         
-        # Remove structure conflicts at width and depth boundaries as a result of imperfect PBC
+        # Remove structure conflicts at width and depth 
+        # boundaries as a result of imperfect PBC
         pmg = AseAtomsAdaptor.get_structure(chiseled)
         s = pmg.copy()
         pos = s.cart_coords
@@ -298,22 +352,25 @@ class TopGrain(Slab):
             if crd[0] < 0.5:
                 test_crd = crd.copy()
                 test_crd[0] += width
-                if np.any((distance_matrix([test_crd], pos)[0]< 1) == True) == True and i not in indel:
+                if np.any((distance_matrix([test_crd], pos)[0]< 1) == True) ==\
+                                                       True and i not in indel:
                     indel.append(i)
             if crd[2] < 0.5:
                 test_crd = crd.copy()
                 test_crd[2] += depth
-                if np.any((distance_matrix([test_crd], pos)[0]< 1) == True) == True and i not in indel:
+                if np.any((distance_matrix([test_crd], pos)[0]< 1) == True) ==\
+                                                       True and i not in indel:
                     indel.append(i)
             i+=1
         s.remove_sites(indel)
 
         # If flip_species = True and 2 element criteria satisfied
-        species_list = [str(a).replace("Element","").strip() for a in list(s.species)]
+        species_list = [str(a).replace("Element","").strip() for a in \
+                                                               list(s.species)]
         unique_species = list(set(species_list))
         if len(unique_species) == 2 and flip_species:
             for i in range(len(s)):
-                s[i] = unique_species[int(str(s[i].specie) == unique_species[0])]
+                s[i] = unique_species[int(str(s[i].specie)==unique_species[0])]
         return s
 
     def to_vasp(self,filename):
@@ -338,7 +395,8 @@ class BottomGrain(Slab):
             width: The width of the bicrystal supercell to set grain in 
             height: The height of the bicrystal supercell to set grain in 
             depth: The depth of the bicrystal supercell to set grain in 
-            set_in: The position (top/bottom) to set grain in bicrystal supercell 
+            set_in: The position (top/bottom) to set grain in bicrystal 
+            supercell 
 
         Returns:
             A pymatgen grain structure set into a bicrystal supercell
