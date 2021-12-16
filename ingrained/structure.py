@@ -130,7 +130,7 @@ class PartialCharge(object):
                     
         self.chgdata = new_dat
         self.zmax = self.structure.cart_coords[:, 2].max()/ \
-                        self.structure.lattice.c 
+                                                       self.structure.lattice.c 
 
         # Write structure to ensure no confusion
         if write_struct:

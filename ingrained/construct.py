@@ -201,31 +201,40 @@ class Slab(object):
         if position_filt != []:
             if direction=='width':
                 # Find index of closest_b (not in column)
-                cb_idx = np.argmin(np.abs(position_filt[:,1]-position[select_idx][1]))
+                cb_idx = np.argmin(np.abs(position_filt[:,1]-\
+                                                      position[select_idx][1]))
                 # Compute "a" distance to closest proxy atom
-                adis = np.round(np.abs(position[select_idx][0]-position_filt[cb_idx][0]),4)
+                adis = np.round(np.abs(position[select_idx][0]-\
+                                                   position_filt[cb_idx][0]),4)
                 # Compute "b" tolerance to closest proxy atom
-                btol = np.round(np.abs((position_filt[cb_idx][1]-position[select_idx][1])),4)
+                btol = np.round(np.abs((position_filt[cb_idx][1]-\
+                                                   position[select_idx][1])),4)
 
             elif direction=='height':
                 # Find index of closest_b (not in column)
-                cb_idx = np.argmin(np.abs(position_filt[:,1]-position[select_idx][1]))
+                cb_idx = np.argmin(np.abs(position_filt[:,1]-\
+                                                      position[select_idx][1]))
                 # Compute "a" distance to closest proxy atom
-                adis = np.round(np.abs(position[select_idx][2]-position_filt[cb_idx][2]),4)
+                adis = np.round(np.abs(position[select_idx][2]-\
+                                                   position_filt[cb_idx][2]),4)
                 # Compute "b" tolerance to closest proxy atom
-                btol = np.round(np.abs((position_filt[cb_idx][1]-position[select_idx][1])),4)
+                btol = np.round(np.abs((position_filt[cb_idx][1]-\
+                                                   position[select_idx][1])),4)
  
         return(adis,btol)
 
     def get_repeat_dist(self,direction="width",mode="tol"):
         """
-        Find the approximate length needed for one full repeat of the structure along width or depth. 
+        Find the approximate length needed for one full repeat of the structure
+        along width or depth. 
 
         Args:
             pymatgen_structure: The input pymatgen structure
             direction: The direction along which to find repeat length 
-                       (width = perp to uvw_project and uvw_upward, depth = along uvw_project)
-            mode: The decision used to accept the solution (tol = min tolerance, len = min length)
+                       (width = perp to uvw_project and uvw_upward, 
+                       depth = along uvw_project)
+            mode: The decision used to accept the solution (tol = 
+                                               min tolerance, len = min length)
 
         Returns:
             A float representing the length needed for structure to repeat. 
@@ -295,8 +304,10 @@ class Slab(object):
                np.sum(crds[:, 2])/crds.shape[0]
 
 class TopGrain(Slab):
-    def __init__(self, chemical_formula, space_group, uvw_project, uvw_upward, tilt_angle, max_dimension, flip_species=False):
-        super().__init__(chemical_formula, space_group, uvw_project, uvw_upward, tilt_angle, max_dimension)
+    def __init__(self, chemical_formula, space_group, uvw_project, uvw_upward, 
+                                tilt_angle, max_dimension, flip_species=False):
+        super().__init__(chemical_formula, space_group, uvw_project, 
+                                         uvw_upward, tilt_angle, max_dimension)
         
         self.height = max_dimension
         self.structure = self.set_in_bicrystal(flip_species=flip_species)
@@ -380,8 +391,10 @@ class TopGrain(Slab):
         XYZ(self.structure).write_file(filename=filename+".xyz")
 
 class BottomGrain(Slab):
-    def __init__(self, chemical_formula, space_group, uvw_project, uvw_upward, tilt_angle, max_dimension,flip_species=False):
-        super().__init__(chemical_formula, space_group, uvw_project, uvw_upward, tilt_angle, max_dimension)
+    def __init__(self, chemical_formula, space_group, uvw_project, 
+                     uvw_upward, tilt_angle, max_dimension,flip_species=False):
+        super().__init__(chemical_formula, space_group, uvw_project, 
+                                         uvw_upward, tilt_angle, max_dimension)
         
         self.height = max_dimension
         self.structure = self.set_in_bicrystal(flip_species=flip_species)
@@ -409,7 +422,9 @@ class BottomGrain(Slab):
         pos = chiseled.get_positions()
         pos -= np.min(pos,axis=0)   
         chiseled.set_positions(pos) 
-        inidx = np.all(np.logical_and(pos>=[0,0,0],pos<[width,height,depth]),axis=1)
+        inidx = np.all(np.logical_and(pos>=[0,0,0],
+                                      pos<[width,height,depth]),
+                                      axis=1)
         
         del pos
         del chiseled[np.logical_not(inidx)]
@@ -433,22 +448,25 @@ class BottomGrain(Slab):
             if crd[0] < 0.5:
                 test_crd = crd.copy()
                 test_crd[0] += width
-                if np.any((distance_matrix([test_crd], pos)[0]< 1) == True) == True and i not in indel:
+                if np.any((distance_matrix([test_crd], pos)[0]< 1) == True) ==\
+                                                       True and i not in indel:
                     indel.append(i)
             if crd[2] < 0.5:
                 test_crd = crd.copy()
                 test_crd[2] += depth
-                if np.any((distance_matrix([test_crd], pos)[0]< 1) == True) == True and i not in indel:
+                if np.any((distance_matrix([test_crd], pos)[0]< 1) == True) ==\
+                                                       True and i not in indel:
                     indel.append(i)
             i+=1
         s.remove_sites(indel)
 
         # If flip_species = True and 2 element criteria satisfied
-        species_list = [str(a).replace("Element","").strip() for a in list(s.species)]
+        species_list = [str(a).replace("Element","").strip() for a in \
+                                                               list(s.species)]
         unique_species = list(set(species_list))
         if len(unique_species) == 2 and flip_species:
             for i in range(len(s)):
-                s[i] = unique_species[int(str(s[i].specie) == unique_species[0])]
+                s[i] = unique_species[int(str(s[i].specie)==unique_species[0])]
         return s
 
     def to_vasp(self,filename):

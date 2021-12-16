@@ -590,21 +590,27 @@ class CongruityBuilder(object):
             the "figure-of-merit" value).
         """
         # Get list of variables that are to be kept constant
-        constants = fixed[0][0]
+        print(fixed,'FIXXXXXXXED')
+        if len(fixed[0][0])>0:
+            constants,file_counter = fixed[0][0][0],fixed[1]
+            reord_vars = {}
+            for i in constants:
+                reord_vars[i] = fixed[0][0][constants.index(i) + 1]
+        else:
+            file_counter=''
+            constants = []
         # Convert list of constants into dictionary
-        reord_vars = {}
-        for i in constants:
-            reord_vars[i] = fixed[0][constants.index(i) + 1]
+            reord_vars = {}
+            for i in constants:
+                reord_vars[i] = fixed[0][constants.index(i) + 1]
         # Add variables to dictionary
-        counter = 0
+        dict_counter = 0
         for i in range(13):
             if i not in constants:
-                reord_vars[i] = x[counter]
-                counter += 1
+                reord_vars[i] = x[dict_counter]
+                dict_counter += 1
         # Convert dictionary to correctly ordered list
         xfit = [reord_vars[i] for i in range(13)]
-        # xfit = [a for a in x[:-2]] + [int(a) for a in x[-2::]]
-        # fixed=fixed[0]
         try:
             sim_img, sim_struct, exp_patch, shift_score, __ = self.fit(
                 xfit, fixed, display=False
@@ -622,15 +628,17 @@ class CongruityBuilder(object):
         summary = summary + "\n       🌀 FOM                       :  {}\n".format(fom)
         # Print for viewing progress
         print(summary)
+        if file_counter!='':
+            print("Parallel run: "+str(file_counter))
         # Print to record progress to file
         print(
             ",".join(str(v) for v in [self.iter] + xfit + [fom]),
-            file=open("progress.txt", "a"),
+            file=open("progress"+str(file_counter)+".txt", "a"),
         )
         self.iter += 1
         return fom
 
-    def taxicab_ssim_objective_gb(self, x):
+    def taxicab_ssim_objective_gb(self, x,counter=''):
         """
         Objective function used to quantify how well a given set of input 
         imaging paramters, x, produce an image that can be arranged in such 
@@ -679,7 +687,7 @@ class CongruityBuilder(object):
         # Print to record progress to file
         print(
             ",".join(str(v) for v in [self.iter] + xfit + [fom]),
-            file=open("progress.txt", "a"),
+            file=open("progress"+str(counter)+".txt", "a"),
         )
         self.iter += 1
         return fom
@@ -691,6 +699,7 @@ class CongruityBuilder(object):
         initial_solution="",
         fixed_params=[()],
         search_mode="stm",
+        counter=''
     ):
         """
         Wrapper around scipy.optimize.minimize solvers, to find optimal 
@@ -710,17 +719,15 @@ class CongruityBuilder(object):
 
         Returns:
         """
-        if os.path.isfile(os.getcwd() + "/progress.txt"):
+        if os.path.isfile(os.getcwd() + "/progress"+str(counter)+".txt"):
             proceed = ""
             while str(proceed).upper() not in ["Y", "N"]:
                 proceed = input("Append to existing progress file? [Y/N]: ")
             if str(proceed).upper() == "N":
-                os.remove(os.getcwd() + "/progress.txt")
+                os.remove(os.getcwd() + "/progress"+str(counter)+".txt")
             else:
                 pass
-
         self.iter = 1
-
         print("Search mode: {}".format(search_mode))
         if search_mode == "stm":
             if optimizer == "COBYLA":
@@ -728,7 +735,7 @@ class CongruityBuilder(object):
                     return minimize(
                         self.taxicab_ssim_objective,
                         initial_solution,
-                        args=fixed_params,
+                        args=[fixed_params,counter],
                         method="COBYLA",
                         tol=1e-6,
                         options={"disp": True, "rhobeg": 0.25, "catol": 0.01},
@@ -739,10 +746,10 @@ class CongruityBuilder(object):
                     return minimize(
                         self.taxicab_ssim_objective,
                         initial_solution,
-                        args=fixed_params,
+                        args=[fixed_params,counter],
                         method="Powell",
                         tol=1e-6,
-                        options={"disp": True},
+                        options={"disp": True}
                     )
 
         elif search_mode == "gb":
