@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import ingrained.image_ops as iop
 from ingrained.structure import Bicrystal, PartialCharge
 from ingrained.optimize import CongruityBuilder
-
+from multiprocessing import Pool
 
 class Printer:
     """Print things to stdout on one line dynamically"""
@@ -26,6 +26,69 @@ def blockPrint():
 # Restore
 def enablePrint():
     sys.stdout = sys.__stdout__
+    
+    
+def multistart(sim_params,num_starts,sim_obj,exp_img,
+                objective='taxicab_ssim',optimizer='Powell',search_mode='',
+                fixed_params=[]):
+    """
+    Function to facilitate running multiple optimizations at once
+    NOTE: Will not function properly if progress files already exist!!!
+
+
+
+    Args:
+        sim_params (list): The initial parameters to use
+        num_starts (int) : The number of optimizations to run
+                           in parallel
+        sim_obj (PartialCharge): PARCHG to use as reference
+        exp_img (2x2 array)    : Array representing the
+                                 experimental image
+        fixed_params (list): List of sim_param indexes to keep fixed
+
+    """
+    starts=[]
+    rand = np.random
+    for i in range(num_starts):
+        zcap = .25*sim_obj.structure.lattice.c
+        new_input=[sim_params[0]*rand.random(),
+                   zcap/2+zcap/2*rand.random()]
+        rhos, nzmax = sim_obj._get_stm_vol(new_input[0],
+                                           new_input[1])
+        new_input.append(rhos.max()/3+rhos.max()*2/3*rand.random())
+        new_input.append(new_input[2]*.98)
+        new_input+=sim_params[4:10]
+        new_input.append(1+2*rand.random())
+        new_input+=sim_params[-2:]
+        print(new_input)
+        new_input+=[i,sim_obj, exp_img,
+                    fixed_params,
+                    objective,optimizer,search_mode]
+        starts.append(new_input)
+    workers = Pool(processes=num_starts)
+    workers.map(multi_congruity_finder, starts)
+
+
+def multi_congruity_finder(start_inputs):
+    """
+    Helper for the 'multistart' function to allow parallelization
+    """
+
+    initial_solution=start_inputs[:13]
+    (counter,sim_obj,exp_img,fixed_index,
+        objective,optimizer,search_mode)=start_inputs[13:]
+    fixed_params=[[fixed_index]+[initial_solution[i] for i in fixed_index]]
+    subtract_counter=0
+    for i in fixed_index:
+        initial_solution.pop(i-subtract_counter)
+        subtract_counter+=1
+    congruity = CongruityBuilder(sim_obj=sim_obj, exp_img=exp_img)
+    congruity.find_correspondence(objective=objective, optimizer=optimizer,
+                                  initial_solution=initial_solution,
+                                  fixed_params=fixed_params,
+                                  search_mode=search_mode,
+                                  counter=counter)
+
 
 
 def print_frames(config_file="", poscar_file="", exp_img="", exp_title="",
@@ -103,20 +166,10 @@ def print_frames(config_file="", poscar_file="", exp_img="", exp_title="",
             blockPrint()
             try:
                 if search_mode.lower() == "gb":
-                    (
-                        sim_img,
-                        sim_struct,
-                        exp_patch,
-                        shift_score,
-                        stable_idxs,
+                    (sim_img, sim_struct, exp_patch, shift_score, stable_idxs,
                     ) = congruity.fit_gb(sim_params=xfit, bias_y=bias_y)
                 elif search_mode.lower() == "stm":
-                    (
-                        sim_img,
-                        sim_struct,
-                        exp_patch,
-                        shift_score,
-                        stable_idxs,
+                    (sim_img, sim_struct, exp_patch, shift_score, stable_idxs,
                     ) = congruity.fit(sim_params=xfit)
             except:
                 sim_img = np.ones(np.shape(congruity.exp_img))
@@ -145,20 +198,10 @@ def print_frames(config_file="", poscar_file="", exp_img="", exp_title="",
         blockPrint()
         try:
             if search_mode.lower() == "gb":
-                (
-                    sim_img,
-                    sim_struct,
-                    exp_patch,
-                    shift_score,
-                    stable_idxs,
+                (sim_img, sim_struct, exp_patch, shift_score, stable_idxs,
                 ) = congruity.fit_gb(sim_params=xfit, bias_y=bias_y)
             elif search_mode.lower() == "stm":
-                (
-                    sim_img,
-                    sim_struct,
-                    exp_patch,
-                    shift_score,
-                    stable_idxs,
+                (sim_img, sim_struct, exp_patch, shift_score, stable_idxs,
                 ) = congruity.fit(sim_params=xfit)
         except:
             sim_img = np.ones(np.shape(congruity.exp_img))
@@ -186,20 +229,10 @@ def print_frames(config_file="", poscar_file="", exp_img="", exp_title="",
         blockPrint()
         try:
             if search_mode.lower() == "gb":
-                (
-                    sim_img,
-                    sim_struct,
-                    exp_patch,
-                    shift_score,
-                    stable_idxs,
+                (sim_img, sim_struct, exp_patch, shift_score, stable_idxs,
                 ) = congruity.fit_gb(sim_params=xfit, bias_y=bias_y)
             elif search_mode.lower() == "stm":
-                (
-                    sim_img,
-                    sim_struct,
-                    exp_patch,
-                    shift_score,
-                    stable_idxs,
+                (sim_img, sim_struct, exp_patch, shift_score, stable_idxs,
                 ) = congruity.fit(sim_params=xfit)
 
         except:
@@ -233,20 +266,10 @@ def print_frames(config_file="", poscar_file="", exp_img="", exp_title="",
             blockPrint()
             try:
                 if search_mode.lower() == "gb":
-                    (
-                        sim_img,
-                        sim_struct,
-                        exp_patch,
-                        shift_score,
-                        stable_idxs,
+                    (sim_img, sim_struct, exp_patch, shift_score, stable_idxs,
                     ) = congruity.fit_gb(sim_params=xfit, bias_y=bias_y)
                 elif search_mode.lower() == "stm":
-                    (
-                        sim_img,
-                        sim_struct,
-                        exp_patch,
-                        shift_score,
-                        stable_idxs,
+                    (sim_img, sim_struct, exp_patch, shift_score, stable_idxs,
                     ) = congruity.fit(sim_params=xfit)
             except:
                 sim_img = np.ones(np.shape(congruity.exp_img))
@@ -280,20 +303,10 @@ def print_frames(config_file="", poscar_file="", exp_img="", exp_title="",
             blockPrint()
             try:
                 if search_mode.lower() == "gb":
-                    (
-                        sim_img,
-                        sim_struct,
-                        exp_patch,
-                        shift_score,
-                        stable_idxs,
+                    (sim_img, sim_struct, exp_patch, shift_score, stable_idxs,
                     ) = congruity.fit_gb(sim_params=xfit, bias_y=bias_y)
                 elif search_mode.lower() == "stm":
-                    (
-                        sim_img,
-                        sim_struct,
-                        exp_patch,
-                        shift_score,
-                        stable_idxs,
+                    (sim_img, sim_struct, exp_patch, shift_score, stable_idxs,
                     ) = congruity.fit(sim_params=xfit)
             except:
                 sim_img = np.ones(np.shape(congruity.exp_img))
@@ -328,20 +341,10 @@ def print_frames(config_file="", poscar_file="", exp_img="", exp_title="",
             blockPrint()
             try:
                 if search_mode.lower() == "gb":
-                    (
-                        sim_img,
-                        sim_struct,
-                        exp_patch,
-                        shift_score,
-                        stable_idxs,
+                    (sim_img, sim_struct, exp_patch, shift_score, stable_idxs,
                     ) = congruity.fit_gb(sim_params=xfit, bias_y=bias_y)
                 elif search_mode.lower() == "stm":
-                    (
-                        sim_img,
-                        sim_struct,
-                        exp_patch,
-                        shift_score,
-                        stable_idxs,
+                    (sim_img, sim_struct, exp_patch, shift_score, stable_idxs,   
                     ) = congruity.fit(sim_params=xfit)
             except:
                 sim_img = np.ones(np.shape(congruity.exp_img))
@@ -370,20 +373,10 @@ def print_frames(config_file="", poscar_file="", exp_img="", exp_title="",
         blockPrint()
         try:
             if search_mode.lower() == "gb":
-                (
-                    sim_img,
-                    sim_struct,
-                    exp_patch,
-                    shift_score,
-                    stable_idxs,
+                (sim_img, sim_struct, exp_patch, shift_score, stable_idxs,
                 ) = congruity.fit_gb(sim_params=xfit, bias_y=bias_y)
             elif search_mode.lower() == "stm":
-                (
-                    sim_img,
-                    sim_struct,
-                    exp_patch,
-                    shift_score,
-                    stable_idxs,
+                (sim_img, sim_struct, exp_patch, shift_score, stable_idxs,
                 ) = congruity.fit(sim_params=xfit)
         except:
             sim_img = np.ones(np.shape(congruity.exp_img))
