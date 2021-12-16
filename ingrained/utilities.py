@@ -89,7 +89,45 @@ def multi_congruity_finder(start_inputs):
                                   search_mode=search_mode,
                                   counter=counter)
 
+def locate_frame(idx,progress,search_mode,congruity,
+                         cmap,describe_frames,save_path,bias_y=''):
+    """
+    Helper function for repetition in 'print_frames'
+    Args:
+        idx (int): index
+    """
+    idx = int(idx)
+    # Select data from frame
+    x = progress[idx]
+    xfit = x[1:-1]
+    xfit = [a for a in xfit[:-2]] + [int(a) for a in xfit[-2::]]
+    blockPrint()
+    try:
+        if search_mode.lower() == "gb":
+            (sim_img, sim_struct, exp_patch, shift_score, stable_idxs,
+            ) = congruity.fit_gb(sim_params=xfit, bias_y=bias_y)
+        elif search_mode.lower() == "stm":
+            (sim_img, sim_struct, exp_patch, shift_score, stable_idxs,
+            ) = congruity.fit(sim_params=xfit)
+    except:
+        sim_img = np.ones(np.shape(congruity.exp_img))
+        stable_idxs = (0, 0)
+    congruity.display_panel(
+        moving=sim_img,
+        critical_idx=stable_idxs,
+        score=x[-1],
+        iternum=int(x[0]),
+        cmap=cmap,
+        title_list=describe_frames,
+        savename=save_path
+        + "/frames/ingrained"
+        + "-"
+        + str(idx).zfill(5)
+        + ".png",
+    )
 
+    
+    
 
 def print_frames(config_file="", poscar_file="", exp_img="", exp_title="",
                      progress_file="", frame_selection="", 
@@ -160,173 +198,36 @@ def print_frames(config_file="", poscar_file="", exp_img="", exp_title="",
 
     if decision.lower() == "all":
         for i in range(np.shape(progress)[0]):
-            x = progress[i]
-            xfit = x[1:-1]
-            xfit = [a for a in xfit[:-2]] + [int(a) for a in xfit[-2::]]
-            blockPrint()
-            try:
-                if search_mode.lower() == "gb":
-                    (sim_img, sim_struct, exp_patch, shift_score, stable_idxs,
-                    ) = congruity.fit_gb(sim_params=xfit, bias_y=bias_y)
-                elif search_mode.lower() == "stm":
-                    (sim_img, sim_struct, exp_patch, shift_score, stable_idxs,
-                    ) = congruity.fit(sim_params=xfit)
-            except:
-                sim_img = np.ones(np.shape(congruity.exp_img))
-                stable_idxs = (0, 0)
-            congruity.display_panel(
-                moving=sim_img,
-                critical_idx=stable_idxs,
-                score=x[-1],
-                iternum=int(x[0]),
-                cmap=cmap,
-                title_list=describe_frames,
-                savename=save_path
-                + "/frames/ingrained"
-                + "-"
-                + str(i + 1).zfill(5)
-                + ".png",
-            )
-            enablePrint()
-            Printer("Writing frame {} to file".format(i + 1))
+            locate_frame(i,progress,search_mode,
+                              congruity,cmap,describe_frames,save_path,bias_y)
 
     elif decision.lower() == "best":
         best_idx = int(np.argmin(progress[:, -1]))
-        x = progress[best_idx]
-        xfit = x[1:-1]
-        xfit = [a for a in xfit[:-2]] + [int(a) for a in xfit[-2::]]
-        blockPrint()
-        try:
-            if search_mode.lower() == "gb":
-                (sim_img, sim_struct, exp_patch, shift_score, stable_idxs,
-                ) = congruity.fit_gb(sim_params=xfit, bias_y=bias_y)
-            elif search_mode.lower() == "stm":
-                (sim_img, sim_struct, exp_patch, shift_score, stable_idxs,
-                ) = congruity.fit(sim_params=xfit)
-        except:
-            sim_img = np.ones(np.shape(congruity.exp_img))
-            stable_idxs = (0, 0)
-        congruity.display_panel(
-            moving=sim_img,
-            critical_idx=stable_idxs,
-            score=x[-1],
-            iternum=int(x[0]),
-            cmap=cmap,
-            title_list=describe_frames,
-            savename=save_path + "/frames/ingrained" + "-best" + ".png",
-        )
-        enablePrint()
-        Printer("Writing frame {} to file".format(best_idx + 1))
+        locate_frame(best_idx,progress,search_mode,
+                              congruity,cmap,describe_frames,save_path,bias_y)
 
     elif decision.lower() == "final":
         final_idx = np.shape(progress)[0] - 1
-        x = progress[final_idx]
-        xfit = x[1:-1]
-        xfit = [a for a in xfit[:-2]] + [int(a) for a in xfit[-2::]]
-        sim_img, sim_struct, exp_patch, shift_score, stable_idxs=congruity.fit(
-            sim_params=xfit
-        )
-        blockPrint()
-        try:
-            if search_mode.lower() == "gb":
-                (sim_img, sim_struct, exp_patch, shift_score, stable_idxs,
-                ) = congruity.fit_gb(sim_params=xfit, bias_y=bias_y)
-            elif search_mode.lower() == "stm":
-                (sim_img, sim_struct, exp_patch, shift_score, stable_idxs,
-                ) = congruity.fit(sim_params=xfit)
-
-        except:
-            sim_img = np.ones(np.shape(congruity.exp_img))
-            stable_idxs = (0, 0)
-        congruity.display_panel(
-            moving=sim_img,
-            critical_idx=stable_idxs,
-            score=x[-1],
-            iternum=int(x[0]),
-            cmap=cmap,
-            title_list=describe_frames,
-            savename=save_path
-            + "/frames/ingrained"
-            + "-"
-            + str(final_idx + 1).zfill(5)
-            + ".png",
-        )
-        enablePrint()
-        Printer("Writing frame {} to file".format(final_idx + 1))
-
+        locate_frame(final_idx,progress,search_mode,
+                              congruity,cmap,describe_frames,save_path,bias_y)
+     
     elif (
         len(str(decision.lower()).split(",")) > 1
         and len(str(decision.lower()).split("-")) == 1
     ):
         for idx in str(decision.lower()).split(","):
-            idx = int(idx)
-            x = progress[idx - 1]
-            xfit = x[1:-1]
-            xfit = [a for a in xfit[:-2]] + [int(a) for a in xfit[-2::]]
-            blockPrint()
-            try:
-                if search_mode.lower() == "gb":
-                    (sim_img, sim_struct, exp_patch, shift_score, stable_idxs,
-                    ) = congruity.fit_gb(sim_params=xfit, bias_y=bias_y)
-                elif search_mode.lower() == "stm":
-                    (sim_img, sim_struct, exp_patch, shift_score, stable_idxs,
-                    ) = congruity.fit(sim_params=xfit)
-            except:
-                sim_img = np.ones(np.shape(congruity.exp_img))
-                stable_idxs = (0, 0)
-            congruity.display_panel(
-                moving=sim_img,
-                critical_idx=stable_idxs,
-                score=x[-1],
-                iternum=int(x[0]),
-                cmap=cmap,
-                title_list=describe_frames,
-                savename=save_path
-                + "/frames/ingrained"
-                + "-"
-                + str(idx).zfill(5)
-                + ".png",
-            )
-            enablePrint()
-            Printer("Writing frame {} to file".format(idx))
-
+            locate_frame(idx,progress,search_mode,
+                              congruity,cmap,describe_frames,save_path,bias_y)
+           
     elif (
         len(str(decision.lower()).split("-")) == 2
         and len(str(decision.lower()).split(",")) == 1
     ):
         lb, ub = str(decision.lower()).split("-")
         for idx in range(int(lb), int(ub) + 1):
-            idx = int(idx)
-            x = progress[idx - 1]
-            xfit = x[1:-1]
-            xfit = [a for a in xfit[:-2]] + [int(a) for a in xfit[-2::]]
-            blockPrint()
-            try:
-                if search_mode.lower() == "gb":
-                    (sim_img, sim_struct, exp_patch, shift_score, stable_idxs,
-                    ) = congruity.fit_gb(sim_params=xfit, bias_y=bias_y)
-                elif search_mode.lower() == "stm":
-                    (sim_img, sim_struct, exp_patch, shift_score, stable_idxs,
-                    ) = congruity.fit(sim_params=xfit)
-            except:
-                sim_img = np.ones(np.shape(congruity.exp_img))
-                stable_idxs = (0, 0)
-            congruity.display_panel(
-                moving=sim_img,
-                critical_idx=stable_idxs,
-                score=x[-1],
-                iternum=int(x[0]),
-                cmap=cmap,
-                title_list=describe_frames,
-                savename=save_path
-                + "/frames/ingrained"
-                + "-"
-                + str(idx).zfill(5)
-                + ".png",
-            )
-            enablePrint()
-            Printer("Writing frame {} to file".format(idx))
-
+            locate_frame(idx,progress,search_mode,
+                              congruity,cmap,describe_frames,save_path,bias_y)
+     
     elif (
         len(str(decision.lower()).split(":")) == 3
         and len(str(decision.lower()).split("-")) == 1
@@ -334,65 +235,13 @@ def print_frames(config_file="", poscar_file="", exp_img="", exp_title="",
     ):
         start, step, stop = str(decision.lower()).split(":")
         for idx in range(int(start), int(stop) + 1, int(step)):
-            idx = int(idx)
-            x = progress[idx - 1]
-            xfit = x[1:-1]
-            xfit = [a for a in xfit[:-2]] + [int(a) for a in xfit[-2::]]
-            blockPrint()
-            try:
-                if search_mode.lower() == "gb":
-                    (sim_img, sim_struct, exp_patch, shift_score, stable_idxs,
-                    ) = congruity.fit_gb(sim_params=xfit, bias_y=bias_y)
-                elif search_mode.lower() == "stm":
-                    (sim_img, sim_struct, exp_patch, shift_score, stable_idxs,   
-                    ) = congruity.fit(sim_params=xfit)
-            except:
-                sim_img = np.ones(np.shape(congruity.exp_img))
-                stable_idxs = (0, 0)
-            congruity.display_panel(
-                moving=sim_img,
-                critical_idx=stable_idxs,
-                score=x[-1],
-                iternum=int(x[0]),
-                cmap=cmap,
-                title_list=describe_frames,
-                savename=save_path
-                + "/frames/ingrained"
-                + "-"
-                + str(idx).zfill(5)
-                + ".png",
-            )
-            enablePrint()
-            Printer("Writing frame {} to file".format(idx))
-
+            locate_frame(idx,progress,search_mode,
+                              congruity,cmap,describe_frames,save_path,bias_y)
+           
     elif decision.isdigit():
-        idx = int(decision)
-        x = progress[idx - 1]
-        xfit = x[1:-1]
-        xfit = [a for a in xfit[:-2]] + [int(a) for a in xfit[-2::]]
-        blockPrint()
-        try:
-            if search_mode.lower() == "gb":
-                (sim_img, sim_struct, exp_patch, shift_score, stable_idxs,
-                ) = congruity.fit_gb(sim_params=xfit, bias_y=bias_y)
-            elif search_mode.lower() == "stm":
-                (sim_img, sim_struct, exp_patch, shift_score, stable_idxs,
-                ) = congruity.fit(sim_params=xfit)
-        except:
-            sim_img = np.ones(np.shape(congruity.exp_img))
-            stable_idxs = (0, 0)
-        congruity.display_panel(
-            moving=sim_img,
-            critical_idx=stable_idxs,
-            score=x[-1],
-            iternum=int(x[0]),
-            cmap=cmap,
-            title_list=describe_frames,
-            savename=save_path + "/frames/ingrained" + "-" + \
-                                                    str(idx).zfill(5) + ".png")
-        enablePrint()
-        Printer("Writing frame {} to file".format(idx))
-
+        locate_frame(idx,progress,search_mode,
+                              congruity,cmap,describe_frames,save_path,bias_y)
+           
     else:
         Printer('Selection "{}" not understood!'.format(decision))
         print()
