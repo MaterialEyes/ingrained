@@ -216,10 +216,10 @@ class PartialCharge(object):
         """
         # Enforce max stretch/squeeze and max/min 
         # shear value (both directions 0.30)  
-        sim_params[4] = sorted((-0.50, sim_params[4], 0.50))[1]
-        sim_params[5] = sorted((-0.50, sim_params[5], 0.50))[1]
-        sim_params[6] = sorted((-0.50, sim_params[6], 0.50))[1]
-        sim_params[7] = sorted((-0.50, sim_params[7], 0.50))[1]        
+        sim_params[4] = sorted((-0.10, sim_params[4], 0.10))[1]
+        sim_params[5] = sorted((-0.10, sim_params[5], 0.10))[1]
+        sim_params[6] = sorted((-0.10, sim_params[6], 0.10))[1]
+        sim_params[7] = sorted((-0.10, sim_params[7], 0.10))[1]        
         # Clamps the rotation between -2pi and 2pi
         sim_params[8] = sorted((-360, sim_params[8], 360))[1]
         # Clamps the given pixel size to a range between 0.05 and 0.40 (Å)
@@ -988,10 +988,10 @@ class Bicrystal(object):
 
         # Enforce max stretch/squeeze and max/min 
         # shear value (both directions 0.20)        
-        sim_params[3] = sorted((-0.20, sim_params[3], 0.20))[1]
-        sim_params[4] = sorted((-0.20, sim_params[4], 0.20))[1]
-        sim_params[5] = sorted((-0.20, sim_params[5], 0.20))[1]
-        sim_params[6] = sorted((-0.20, sim_params[6], 0.20))[1]
+        sim_params[3] = sorted((-0.10, sim_params[3], 0.10))[1]
+        sim_params[4] = sorted((-0.10, sim_params[4], 0.10))[1]
+        sim_params[5] = sorted((-0.10, sim_params[5], 0.10))[1]
+        sim_params[6] = sorted((-0.10, sim_params[6], 0.10))[1]
 
         # Simulate the image cell
         
