@@ -49,22 +49,35 @@ def multistart(sim_params,num_starts,sim_obj,exp_img,
     """
     starts=[]
     rand = np.random
-    for i in range(num_starts):
-        zcap = .25*sim_obj.structure.lattice.c
-        new_input=[sim_params[0]*rand.random(),
-                   zcap/2+zcap/2*rand.random()]
-        rhos, nzmax = sim_obj._get_stm_vol(new_input[0],
-                                           new_input[1])
-        new_input.append(rhos.max()/3+rhos.max()*2/3*rand.random())
-        new_input.append(new_input[2]*.98)
-        new_input+=sim_params[4:10]
-        new_input.append(1+2*rand.random())
-        new_input+=sim_params[-2:]
-        print(new_input)
-        new_input+=[i,sim_obj, exp_img,
-                    fixed_params,
-                    objective,optimizer,search_mode]
-        starts.append(new_input)
+    if search_mode=='stm':
+        for i in range(num_starts):
+            zcap = .25*sim_obj.structure.lattice.c
+            new_input=[sim_params[0]*rand.random(),
+                       zcap/2+zcap/2*rand.random()]
+            rhos, nzmax = sim_obj._get_stm_vol(new_input[0],
+                                               new_input[1])
+            new_input.append(rhos.max()/3+rhos.max()*2/3*rand.random())
+            new_input.append(new_input[2]*.98)
+            new_input+=sim_params[4:10]
+            new_input.append(1+2*rand.random())
+            new_input+=[sim_params[11]*.9+sim_params[11]*.2*rand.random(),
+                        sim_params[12]*.9+sim_params[12]*.2*rand.random()]
+            new_input+=[i,sim_obj, exp_img,
+                        fixed_params,
+                        objective,optimizer,search_mode]
+            starts.append(new_input)
+    elif search_mode=='gb':
+        for i in range(num_starts):
+            new_input=[sim_params[0]*.95+sim_params[0]*.1*rand.random(),
+                       rand.random(),
+                       2*rand.random()]
+            new_input+=sim_params[4:8]
+            new_input+=[sim_params[9]*.9+sim_params[9]*.2*rand.random(),
+                        sim_params[10]*.9+sim_params[10]*.2*rand.random()]
+            new_input+=[i,sim_obj, exp_img,
+                        fixed_params,
+                        objective,optimizer,search_mode]
+
     workers = Pool(processes=num_starts)
     workers.map(multi_congruity_finder, starts)
 
@@ -73,19 +86,19 @@ def multi_congruity_finder(start_inputs):
     """
     Helper for the 'multistart' function to allow parallelization
     """
-
-    initial_solution=start_inputs[:13]
-    (counter,sim_obj,exp_img,fixed_index,
-        objective,optimizer,search_mode)=start_inputs[13:]
-    fixed_params=[[fixed_index]+[initial_solution[i] for i in fixed_index]]
-    subtract_counter=0
-    for i in fixed_index:
-        initial_solution.pop(i-subtract_counter)
-        subtract_counter+=1
+    if start_inputs[-1]=='stm':
+        initial_solution=start_inputs[:13]
+        (counter,sim_obj,exp_img,fixed_index,
+             objective,optimizer,search_mode)=start_inputs[13:]
+    elif start_inputs[-1]=='gb':
+        initial_solution=start_inputs[:11]
+        (counter,sim_obj,exp_img,fixed_index,
+             objective,optimizer,search_mode)=start_inputs[11:]
+        
     congruity = CongruityBuilder(sim_obj=sim_obj, exp_img=exp_img)
     congruity.find_correspondence(objective=objective, optimizer=optimizer,
                                   initial_solution=initial_solution,
-                                  fixed_params=fixed_params,
+                                  fixed_params=fixed_index,
                                   search_mode=search_mode,
                                   counter=counter)
 
