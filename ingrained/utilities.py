@@ -3,7 +3,6 @@ import sys, os
 
 sys.path.append("../../../")
 import numpy as np
-from skimage.io import imsave
 import matplotlib.pyplot as plt
 import ingrained.image_ops as iop
 from ingrained.structure import Bicrystal, PartialCharge
