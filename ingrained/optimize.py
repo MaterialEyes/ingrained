@@ -512,10 +512,13 @@ class CongruityBuilder(object):
             pass
 
         # Ensure that all images are the same size (same as experiment)
-        moving = iop.apply_resize(moving, np.shape(fixed))
+        #moving = iop.apply_resize(moving, np.shape(fixed))
         base_img = iop.apply_resize(base_img, np.shape(fixed))
-
+        
         fig, axes = plt.subplots(nrows=1, ncols=3)
+                                     #gridspec_kw={'height_widths': widths})
+        fig.set_size_inches((6.5, 2.4), forward=True)
+        
         fig.add_gridspec(nrows=1, ncols=3).update(wspace=0.0, hspace=0.0)
 
         axes[0].imshow(fixed, interpolation="quadric", cmap=cmap)
@@ -525,6 +528,7 @@ class CongruityBuilder(object):
         axes[1].imshow(moving, interpolation="quadric", cmap=cmap)
         axes[1].set_title(title_list[1], fontsize=9)
         axes[1].axis("off")
+
 
         axes[2].imshow(base_img, interpolation="quadric", cmap=cmap)
         axes[2].set_title(title_list[2], fontsize=9)
@@ -559,7 +563,7 @@ class CongruityBuilder(object):
             )
 
         plt.subplots_adjust(left=0.03, right=0.97, top=0.98, bottom=0.02)
-        fig.set_size_inches((6.5, 2.4), forward=True)
+        
 
         plt.savefig(savename, dpi=400)
         plt.close()
@@ -590,27 +594,28 @@ class CongruityBuilder(object):
             the "figure-of-merit" value).
         """
         # Get list of variables that are to be kept constant
-        print(fixed,'FIXXXXXXXED')
-        if len(fixed[0][0])>0:
-            constants,file_counter = fixed[0][0][0],fixed[1]
+        # If constants or a file counter have been given
+        if len(fixed[0][0])>1:
+            constants,file_counter = fixed[0][0],fixed[1]
             reord_vars = {}
+            constant_counter=1
             for i in constants:
-                reord_vars[i] = fixed[0][0][constants.index(i) + 1]
+                reord_vars[i] = fixed[0][constant_counter]
+                constant_counter+=1
         else:
             file_counter=''
+            reord_vars={}
             constants = []
         # Convert list of constants into dictionary
-            reord_vars = {}
-            for i in constants:
-                reord_vars[i] = fixed[0][constants.index(i) + 1]
         # Add variables to dictionary
-        dict_counter = 0
+        reord_counter=0
         for i in range(13):
             if i not in constants:
-                reord_vars[i] = x[dict_counter]
-                dict_counter += 1
+                reord_vars[i] = x[reord_counter]
+                reord_counter+=1
         # Convert dictionary to correctly ordered list
-        xfit = [reord_vars[i] for i in range(13)]
+        xfit = [reord_vars[i] for i in range(11)]+\
+                                    [int(reord_vars[i]) for i in range(11,13)]
         try:
             sim_img, sim_struct, exp_patch, shift_score, __ = self.fit(
                 xfit, fixed, display=False
@@ -638,7 +643,7 @@ class CongruityBuilder(object):
         self.iter += 1
         return fom
 
-    def taxicab_ssim_objective_gb(self, x,counter=''):
+    def taxicab_ssim_objective_gb(self, x,fixed):
         """
         Objective function used to quantify how well a given set of input 
         imaging paramters, x, produce an image that can be arranged in such 
@@ -666,7 +671,28 @@ class CongruityBuilder(object):
             The objective function value (refered to as 
             the the "figure-of-merit" value).
         """
-        xfit = [a for a in x[:-2]] + [int(a) for a in x[-2::]]
+        
+        if len(fixed[0][0])>1:
+            constants,file_counter = fixed[0][0],fixed[1]
+            reord_vars = {}
+            constant_counter=1
+            for i in constants:
+                reord_vars[i] = fixed[0][constant_counter]
+                constant_counter+=1
+        else:
+            file_counter=''
+            reord_vars={}
+            constants = []
+        # Convert list of constants into dictionary
+        # Add variables to dictionary
+        reord_counter=0
+        for i in range(11):
+            if i not in constants:
+                reord_vars[i] = x[reord_counter]
+                reord_counter+=1
+        # Convert dictionary to correctly ordered list
+        xfit = [reord_vars[i] for i in range(9)]+\
+                                    [int(reord_vars[i]) for i in range(9,11)]
         try:
             sim_img, sim_struct, exp_patch, shift_score, __ = self.fit_gb(
                 xfit, display=False
@@ -687,7 +713,7 @@ class CongruityBuilder(object):
         # Print to record progress to file
         print(
             ",".join(str(v) for v in [self.iter] + xfit + [fom]),
-            file=open("progress"+str(counter)+".txt", "a"),
+            file=open("progress"+str(file_counter)+".txt", "a"),
         )
         self.iter += 1
         return fom
@@ -697,7 +723,7 @@ class CongruityBuilder(object):
         objective="taxicab_ssim",
         optimizer="Powell",
         initial_solution="",
-        fixed_params=[()],
+        fixed_params=[[]],
         search_mode="stm",
         counter=''
     ):
@@ -709,11 +735,9 @@ class CongruityBuilder(object):
         Args:
             objective: (string)
             optimizer: (string)
-            initial_solution: (np.array)
-            fixed_params: (list) Which values should be fixed in the run.
-                                 The first entry is a list of the indexes, the
-                                 remaining entries are the set values of those
-                                 parameters
+            initial_solution: (np.array): Initial solution for the match
+            fixed_params: (list) Which indexes of initial_solution 
+                                                should be fixed in the run.
             search_mode: (string) Specify search mode ('gb' for STEM grain
                                   boundaries, and 'stm' for STM images)
 
@@ -727,6 +751,18 @@ class CongruityBuilder(object):
                 os.remove(os.getcwd() + "/progress"+str(counter)+".txt")
             else:
                 pass
+
+        if len(fixed_params)>0:
+            reord_init_sol = []
+            reord_fixed_params=[fixed_params]
+            for i in range(len(initial_solution)):
+                if i in fixed_params:
+                    reord_fixed_params.append(initial_solution[i])
+                else:
+                    reord_init_sol.append(initial_solution[i])
+        else:
+            reord_init_sol=initial_solution
+            reord_fixed_params=[()]
         self.iter = 1
         print("Search mode: {}".format(search_mode))
         if search_mode == "stm":
@@ -734,8 +770,8 @@ class CongruityBuilder(object):
                 if objective == "taxicab_ssim":
                     return minimize(
                         self.taxicab_ssim_objective,
-                        initial_solution,
-                        args=[fixed_params,counter],
+                        reord_init_sol,
+                        args=[reord_fixed_params,counter],
                         method="COBYLA",
                         tol=1e-6,
                         options={"disp": True, "rhobeg": 0.25, "catol": 0.01},
@@ -745,8 +781,8 @@ class CongruityBuilder(object):
                 if objective == "taxicab_ssim":
                     return minimize(
                         self.taxicab_ssim_objective,
-                        initial_solution,
-                        args=[fixed_params,counter],
+                        reord_init_sol,
+                        args=[reord_fixed_params,counter],
                         method="Powell",
                         tol=1e-6,
                         options={"disp": True}
@@ -757,7 +793,8 @@ class CongruityBuilder(object):
                 if objective == "taxicab_ssim":
                     return minimize(
                         self.taxicab_ssim_objective_gb,
-                        initial_solution,
+                        reord_init_sol,
+                        args=[reord_fixed_params,counter],
                         method="COBYLA",
                         tol=1e-6,
                         options={"disp": True, "rhobeg": 0.25, "catol": 0.01},
@@ -767,7 +804,8 @@ class CongruityBuilder(object):
                 if objective == "taxicab_ssim":
                     return minimize(
                         self.taxicab_ssim_objective_gb,
-                        initial_solution,
+                        reord_init_sol,
+                        args=[reord_fixed_params,counter],
                         method="Powell",
                         tol=1e-6,
                         options={"disp": True},
