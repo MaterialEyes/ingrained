@@ -28,17 +28,21 @@ class Slab(object):
         Returns:
             A pymatgen conventional standard unit cell
         """
-        mpr = MPRester("MAPI_KEY")
-        query = mpr.query(criteria={"pretty_formula": self.chemical_formula}, properties=["structure","icsd_ids","spacegroup"])
+        mpr = MPRester("yHFrnKz8NJOPsDIq")
+        query = mpr.query(criteria={"pretty_formula": self.chemical_formula}, 
+                          properties=["structure","icsd_ids","spacegroup"])
         
         # First filter by space_group if provided 
         if self.space_group:
-            query = [query[i] for i in range(len(query)) if SpacegroupAnalyzer(query[i]['structure']).get_space_group_symbol()==self.space_group]
+            query = [query[i] for i in range(len(query)) if 
+                     SpacegroupAnalyzer(query[i]['structure']).get_space_group_symbol()==self.space_group]
 
         # Select minimum volume:
-        selected = query[np.argmin([query[i]['structure'].lattice.volume for i in range(len(query))])]
+        selected = query[np.argmin([query[i]['structure'].lattice.volume for 
+                                                      i in range(len(query))])]
 
-        pymatgen_structure = SpacegroupAnalyzer(selected["structure"]).get_conventional_standard_structure()
+        pymatgen_structure = SpacegroupAnalyzer(selected["structure"]
+                                        ).get_conventional_standard_structure()
         return pymatgen_structure
 
     def _construct_slab(self,max_dimension):
@@ -184,6 +188,8 @@ class Slab(object):
                                                position[select_idx][0]) < 0.2])
 
         return(position_filt)
+        
+        
     def filter_check(position, position_filt, select_idx, direction):
         """
         Helper function for get_repeat_dist
@@ -210,7 +216,7 @@ class Slab(object):
                 btol = np.round(np.abs((position_filt[cb_idx][1]-\
                                                    position[select_idx][1])),4)
 
-            elif direction=='height':
+            elif direction=='depth':
                 # Find index of closest_b (not in column)
                 cb_idx = np.argmin(np.abs(position_filt[:,1]-\
                                                       position[select_idx][1]))
@@ -222,6 +228,7 @@ class Slab(object):
                                                    position[select_idx][1])),4)
  
         return(adis,btol)
+        
 
     def get_repeat_dist(self,direction="width",mode="tol"):
         """
@@ -251,8 +258,8 @@ class Slab(object):
                                                             if element in elem]
             position = np.array([positions_list[idx] for idx in indices])                     
             for select_idx in range(np.shape(position)[0]): 
-                position_filt = filter_atoms(position,select_idx,direction)
-                adis, btol = filter_check(position,
+                position_filt = Slab.filter_atoms(position,select_idx,direction)
+                adis, btol = Slab.filter_check(position,
                                           position_filt,
                                           select_idx,
                                           direction)
