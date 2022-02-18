@@ -27,6 +27,41 @@ def enablePrint():
     sys.stdout = sys.__stdout__
     
     
+    
+def compareAngles(z_below,z_above,sim_obj,exp_img,interval=10):
+    """
+    Function to quickly test which angle is the best fit for the system.
+    As no optimiziation occurs, one should be careful when using this
+    function to determine the best initial angle for the full ingrained
+    optimization run.
+    
+    Inputs:
+        z_below (float): Thickness or depth from top in (Angstrom)
+        z_above (float): Distance above the surface to consider (Angstrom)
+        sim_obg (ingrained.strucutre): PartialCharge object
+        exp_img (ingrained.image_ops): Experimental image fit against
+        interval (int): The interval of angles to rotate through
+    """
+    
+    rhos, nzmax = sim_obj._get_stm_vol(z_below,z_above)
+    
+    score_list=[]
+    for ang in range(0,360,interval):
+        cb = CongruityBuilder(sim_obj=sim_obj,exp_img=exp_img['Pixels'])
+        score = cb.taxicab_ssim_objective([z_below,z_above,rhos.max()*3/4,
+                                              rhos.max()*3/4*.99,
+                                              0,0,0,0,
+                                              ang,
+                                              exp_img["Experiment Pixel Size"],
+                                              0,
+                                              40,40],
+                                              fixed=[[[]]],
+                                              append_summary=False)
+        score_list.append([score,ang])
+    return(score_list)
+    
+    
+
 def multistart(sim_params,num_starts,sim_obj,exp_img,
                 objective='taxicab_ssim',optimizer='Powell',search_mode='',
                 fixed_params=[]):
@@ -76,6 +111,39 @@ def multistart(sim_params,num_starts,sim_obj,exp_img,
             new_input+=[i,sim_obj, exp_img,
                         fixed_params,
                         objective,optimizer,search_mode]
+
+    workers = Pool(processes=num_starts)
+    workers.map(multi_congruity_finder, starts)
+
+def multistart_stm_angle(sim_params,num_starts,sim_obj,exp_img,
+                objective='taxicab_ssim',optimizer='Powell',
+                fixed_params=[],interval=30,cap=180):
+    """
+    Function to facilitate running multiple optimizations at once,
+    focused on rotating the initial image with the same paramenters
+    NOTE: Will not function properly if progress files already exist!!!
+
+
+
+    Args:
+        sim_params (list): The initial parameters to use
+        num_starts (int) : The number of optimizations to run
+                           in parallel
+        sim_obj (PartialCharge): PARCHG to use as reference
+        exp_img (2x2 array)    : Array representing the
+                                 experimental image
+        fixed_params (list): List of sim_param indexes to keep fixed
+
+    """
+    starts=[]
+    for i in range(0,cap+1,interval):
+            new_input=list(sim_params)
+            new_input[9]=i
+            new_input+=[i,sim_obj, exp_img,
+                        fixed_params,
+                        objective,optimizer,'stm']
+            starts.append(new_input)
+
 
     workers = Pool(processes=num_starts)
     workers.map(multi_congruity_finder, starts)
