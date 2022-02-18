@@ -50,8 +50,7 @@ class CongruityBuilder(object):
         self.exp_img = exp_img
         self.iter = iter
 
-    def fit(self, sim_params=[], fix_params=[], display=False, bias_x=0.0, 
-                                                               bias_y=0.0):
+    def fit(self, sim_params=[], display=False, bias_x=0.0, bias_y=0.0):
         """
         Find optimal correspondence between simulation and
         experiment for the specified parameters.
@@ -59,7 +58,6 @@ class CongruityBuilder(object):
         Args:
             sim_params: (list) parameters required for the 'simulate_image'
                                                           method in the sim_obj
-            fix_params: (list) parameters in "sim_params" to keep fixed
             display: (string) plt.show() for intermediate/final fit results
             bias_x: (float) reduce search area in the x-direction by a fraction
             bias_y: (float) reduce search area in the y-direction by a fraction
@@ -71,7 +69,7 @@ class CongruityBuilder(object):
         """
         # Simulate an image using specified parameters
         sim_img, sim_struct = self.sim_obj.simulate_image(
-            sim_params=sim_params, fix_params=fix_params
+            sim_params=sim_params,
         )
 
         # Display simulated image
@@ -484,12 +482,9 @@ class CongruityBuilder(object):
         base_img = fixed.copy()
         filler = moving.flatten("F")
 
-        for i in range(len(rcrds)):
+        for i in range(len(filler)):
             entry = rcrds[i]
             base_img[entry[1], entry[0]] = filler[i]
-
-        # Likely to make simulation square (not always good). Can delete this!
-        # moving = iop.apply_resize(moving, np.shape(fixed))
 
         # Will make heights the same but keep aspect ratio
         fac = np.shape(fixed)[0] / np.shape(moving)[0]
@@ -568,7 +563,7 @@ class CongruityBuilder(object):
         plt.savefig(savename, dpi=400)
         plt.close()
 
-    def taxicab_ssim_objective(self, x, fixed):
+    def taxicab_ssim_objective(self, x, fixed,append_summary=True):
         """
         Objective function used to quantify how well a given set of input 
         imaging paramters, x, produce an image that can be arranged in such 
@@ -587,7 +582,12 @@ class CongruityBuilder(object):
               within the patches)
 
         Args:
-            x: (np.array) set of parameters to test
+            x (np.array): set of parameters to test
+            fixed (np.array): Set of parameters to keep fixed. Structured
+                              as follows:
+                [[[list of indexes],{FIXED INDEX VALUES}],filed_counter]
+            append_summary (boolean): Whether to append the results to an
+                                        ongoing summary
 
         Returns:
             The objective function value (refered to as the 
@@ -595,7 +595,7 @@ class CongruityBuilder(object):
         """
         # Get list of variables that are to be kept constant
         # If constants or a file counter have been given
-        if len(fixed[0][0])>1:
+        if len(fixed[0][0])>0:
             constants,file_counter = fixed[0][0],fixed[1]
             reord_vars = {}
             constant_counter=1
@@ -603,7 +603,7 @@ class CongruityBuilder(object):
                 reord_vars[i] = fixed[0][constant_counter]
                 constant_counter+=1
         else:
-            file_counter=''
+            file_counter=fixed[-1]
             reord_vars={}
             constants = []
         # Convert list of constants into dictionary
@@ -616,31 +616,34 @@ class CongruityBuilder(object):
         # Convert dictionary to correctly ordered list
         xfit = [reord_vars[i] for i in range(11)]+\
                                     [int(reord_vars[i]) for i in range(11,13)]
+
         try:
             sim_img, sim_struct, exp_patch, shift_score, __ = self.fit(
-                xfit, fixed, display=False
+                xfit, display=False
             )
+            
         except Exception as e:
             print(e)
             sim_img = None
-
+            
         if sim_img is not None:
             match_ssim = iop.score_ssim(sim_img, exp_patch)
             fom = 0.1 * (shift_score) + match_ssim
         else:
             fom = 9999
-        summary = self.sim_obj.simulation_summary(self.iter)
-        summary = summary + "\n       🌀 FOM                       :  {}\n".format(fom)
-        # Print for viewing progress
-        print(summary)
-        if file_counter!='':
-            print("Parallel run: "+str(file_counter))
-        # Print to record progress to file
-        print(
-            ",".join(str(v) for v in [self.iter] + xfit + [fom]),
-            file=open("progress"+str(file_counter)+".txt", "a"),
-        )
-        self.iter += 1
+        if append_summary:
+            summary = self.sim_obj.simulation_summary(self.iter)
+            summary = summary + "\n       🌀 FOM                       :  {}\n".format(fom)
+            # Print for viewing progress
+            print(summary)
+            if file_counter!='':
+                print("Parallel run: "+str(file_counter))
+            # Print to record progress to file
+            print(
+                ",".join(str(v) for v in [self.iter] + xfit + [fom]),
+                file=open("progress"+str(file_counter)+".txt", "a"),
+            )
+            self.iter += 1
         return fom
 
     def taxicab_ssim_objective_gb(self, x,fixed):
@@ -686,13 +689,13 @@ class CongruityBuilder(object):
         # Convert list of constants into dictionary
         # Add variables to dictionary
         reord_counter=0
-        for i in range(11):
+        for i in range(9):
             if i not in constants:
                 reord_vars[i] = x[reord_counter]
                 reord_counter+=1
         # Convert dictionary to correctly ordered list
-        xfit = [reord_vars[i] for i in range(9)]+\
-                                    [int(reord_vars[i]) for i in range(9,11)]
+        xfit = [reord_vars[i] for i in range(7)]+\
+                                    [int(reord_vars[i]) for i in range(7,9)]
         try:
             sim_img, sim_struct, exp_patch, shift_score, __ = self.fit_gb(
                 xfit, display=False
@@ -723,7 +726,7 @@ class CongruityBuilder(object):
         objective="taxicab_ssim",
         optimizer="Powell",
         initial_solution="",
-        fixed_params=[[]],
+        fixed_params=[],
         search_mode="stm",
         counter=''
     ):
@@ -762,7 +765,7 @@ class CongruityBuilder(object):
                     reord_init_sol.append(initial_solution[i])
         else:
             reord_init_sol=initial_solution
-            reord_fixed_params=[()]
+            reord_fixed_params=[[]]
         self.iter = 1
         print("Search mode: {}".format(search_mode))
         if search_mode == "stm":
