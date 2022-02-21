@@ -206,6 +206,54 @@ def locate_frame(idx,progress,search_mode,congruity,
         + ".png",
     )
 
+
+def height_profiles(sim_img,pix_size,resolution=40):
+        """
+        Obtain information on the height profiles between peaks        
+
+        Args:
+            resolution (int): The number of points to sample in the profile
+            pix_size (float): The width of image over number of pixels
+            save (Boolean): Whether to save the height profile as an image
+
+        Returns:
+            list (list): List of heights, terminated by length of the profile
+        """
+        
+        img=sim_img
+        max_ind=[]
+        # Get the maximum height in the array
+        max_height = np.matrix(img).max()
+        for i in range(len(img)):
+            for j in range(len(img[i])):
+                # If the height of the index is within a tolerance
+                if max_height-img[i][j]<1E-3:
+                    max_ind.append(np.array([i,j]))
+        print(len(max_ind))
+        all_profiles = []
+        # Using the first index as the starting point
+        for ind in max_ind[1:]:
+            profiles = []
+            start = ind
+            end   = max_ind[0]
+            for i in range(resolution+1):
+
+                new_ind = (end-start)*i/40+start
+                # Get the index bounds
+                top, bot, left, right = int(new_ind[0]+1),\
+                                        int(new_ind[0]),\
+                                        int(new_ind[1]),\
+                                        int(new_ind[1]+1)
+
+                val=sum([img[top][left]*(new_ind[0]-bot)*(right-new_ind[1]),
+                         img[top][right]*(new_ind[0]-bot)*(new_ind[1]-left),
+                         img[bot][left]*(top-new_ind[0])*(right-new_ind[1]),
+                         img[bot][right]*(top-new_ind[0])*(new_ind[1]-left)])
+                profiles.append(val)
+            length = np.linalg.norm(end-start)*pix_size
+            profiles.append(length)
+            all_profiles.append(profiles)
+        return(all_profiles)
     
     
 
