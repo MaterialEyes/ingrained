@@ -12,9 +12,11 @@ image_data = iop.image_open('HAADF149.dm3')
 # Constrain optimization to clean region of image by cropping
 exp_img = image_data['Pixels'][0:470,0:470]
 
+print('test')
 # View the image before proceeding with optimization
-plt.imshow(exp_img,cmap='gray'); plt.axis('off'); plt.show();
+#plt.imshow(exp_img,cmap='gray'); plt.axis('off'); plt.show();
 
+print('test2')
 # Initialize a Bicrystal object and save the constructed bicrystal structure
 bicrystal = Bicrystal(config_file='config.json', write_poscar=True);
 
@@ -33,6 +35,5 @@ crop_height       = 301
 crop_width        = 161
 
 sim_params = [pix_size, interface_width, defocus, x_shear, y_shear, x_stretch, y_stretch, crop_height, crop_width]
-
 # Find correspondence!
 congruity.find_correspondence(objective='taxicab_ssim', initial_solution=sim_params, search_mode="gb")
