@@ -482,7 +482,7 @@ class CongruityBuilder(object):
         base_img = fixed.copy()
         filler = moving.flatten("F")
 
-        for i in range(len(filler)):
+        for i in range(len(rcrds)):
             entry = rcrds[i]
             base_img[entry[1], entry[0]] = filler[i]
 
