@@ -244,7 +244,7 @@ def height_profiles(sim_img,pix_size,resolution=40):
                                         int(new_ind[0]),\
                                         int(new_ind[1]),\
                                         int(new_ind[1]+1)
-
+                # Scale using lever rule
                 val=sum([img[top][left]*(new_ind[0]-bot)*(right-new_ind[1]),
                          img[top][right]*(new_ind[0]-bot)*(new_ind[1]-left),
                          img[bot][left]*(top-new_ind[0])*(right-new_ind[1]),
