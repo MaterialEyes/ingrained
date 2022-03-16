@@ -225,10 +225,11 @@ class PartialCharge(object):
         sim_params[7] = sorted((-bound, sim_params[7], bound))[1] 
         # Clamp rotation, pixel size, and sigma
         sim_params[8] = sorted((-360, sim_params[8], 360))[1]
+        # If the pixel size was set, ensure it was clamped
         if self.pix_size!=None:
-            sim_params[9]=sorted(0.9*self.pix_size,sim_params[9],
-                                 1.1*self.pix_size)
-        #sim_params[9] = sorted((0.05, sim_params[9], 0.40))[1]
+            sim_params[9]=sorted((0.9*self.pix_size,sim_params[9],
+                                 1.1*self.pix_size))[1]
+        # Clamp blurring
         sim_params[10] = sorted((0, sim_params[10], 8))[1]
 
         # Simulate the image cell
