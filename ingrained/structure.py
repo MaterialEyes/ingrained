@@ -62,6 +62,7 @@ class PartialCharge(object):
         self.cell  = None
         self.image = None
         self.sim_params = None
+        self.pix_size = None
         
     def _get_stm_vol(self, z_below="", z_above=""):
         """        
@@ -186,9 +187,11 @@ class PartialCharge(object):
             return image
 
     
-    def simulate_image(self, sim_params=[],fix_params=[]):
+    def simulate_image(self, sim_params=[]):
         """
         Calculate a full displayable STM image from DFT-simulation.
+        Doubles as a function to clamp certain parameters, preventing 
+        "run away" values during optimization
         
         Args:
             sim_params: (list) specifying the following simulation parameters
@@ -209,23 +212,24 @@ class PartialCharge(object):
                                                                 postprocessing
               - crop_height: (int) final (cropped) image height in pixels
               - crop_width: (int) final (cropped) image width in pixels
-            fix_params: list of variables in "sim_params' to keep fixed
         
         Returns:
             A numpy array (np.float64) of the full simulated image. 
         """
         # Enforce max stretch/squeeze and max/min 
         # shear value (both directions 0.30)  
-        sim_params[4] = sorted((-0.10, sim_params[4], 0.10))[1]
-        sim_params[5] = sorted((-0.10, sim_params[5], 0.10))[1]
-        sim_params[6] = sorted((-0.10, sim_params[6], 0.10))[1]
-        sim_params[7] = sorted((-0.10, sim_params[7], 0.10))[1]        
-        # Clamps the rotation between -2pi and 2pi
+        bound=0.20
+        sim_params[4] = sorted((-bound, sim_params[4], bound))[1]
+        sim_params[5] = sorted((-bound, sim_params[5], bound))[1]
+        sim_params[6] = sorted((-bound, sim_params[6], bound))[1]
+        sim_params[7] = sorted((-bound, sim_params[7], bound))[1] 
+        # Clamp rotation, pixel size, and sigma
         sim_params[8] = sorted((-360, sim_params[8], 360))[1]
-        # Clamps the given pixel size to a range between 0.05 and 0.40 (Å)
-        sim_params[9] = sorted((0.05, sim_params[9], 0.40))[1]
-        # Clamps the given sigma value to a range between 0 and 10
-        sim_params[10] = sorted((0, sim_params[10], 10))[1]
+        if self.pix_size!=None:
+            sim_params[9]=sorted(0.9*self.pix_size,sim_params[9],
+                                 1.1*self.pix_size)
+        #sim_params[9] = sorted((0.05, sim_params[9], 0.40))[1]
+        sim_params[10] = sorted((0, sim_params[10], 8))[1]
 
         # Simulate the image cell
         self._get_stm_cell(z_below=sim_params[0], z_above=sim_params[1], 
@@ -237,6 +241,7 @@ class PartialCharge(object):
         
         # Add shear to account for a non-orthogonal unit cell (if necessary)
         img_tiled = self._apply_lattice_shear(img_tiled)  
+
 
         # Resize image based on pixel_size
         img_tiled = iop.apply_resize(img_tiled, np.array([int(a) for a in 
@@ -256,7 +261,7 @@ class PartialCharge(object):
         if self._image_size_check(img=img_tiled):
 
             # Enforce odd sizes on width and length of cropped image 
-            # (min_length = 25, max_length = current length)
+            # (min_length = 37, max_length = current length)
             sim_params[-2] = sorted((37, \
                        int(2 * np.floor(sim_params[-2]/2) + 1),\
                        int(2 * np.floor((np.shape(img_tiled)[0]-2)/2) + 1)))[1]
@@ -494,6 +499,10 @@ class PartialCharge(object):
         plt.imshow(iop.scale_pixels(self.image,mode='grayscale'),cmap='hot')
         plt.axis('off')
         plt.show()
+        
+        
+
+        
 
 class Bicrystal(object):
     """
@@ -987,11 +996,12 @@ class Bicrystal(object):
         sim_params[2] = sorted((0.5, sim_params[2], 1.75))[1]
 
         # Enforce max stretch/squeeze and max/min 
-        # shear value (both directions 0.20)        
-        sim_params[3] = sorted((-0.10, sim_params[3], 0.10))[1]
-        sim_params[4] = sorted((-0.10, sim_params[4], 0.10))[1]
-        sim_params[5] = sorted((-0.10, sim_params[5], 0.10))[1]
-        sim_params[6] = sorted((-0.10, sim_params[6], 0.10))[1]
+        # shear value (both directions 0.20)
+        bound=0.2        
+        sim_params[3] = sorted((-bound, sim_params[3], bound))[1]
+        sim_params[4] = sorted((-bound, sim_params[4], bound))[1]
+        sim_params[5] = sorted((-bound, sim_params[5], bound))[1]
+        sim_params[6] = sorted((-bound, sim_params[6], bound))[1]
 
         # Simulate the image cell
         
@@ -1000,12 +1010,6 @@ class Bicrystal(object):
                                                 pix_size=sim_params[0], 
                                                 view=False)
         
-        # if new_struct == old_struct:
-        #     print("No modifications were made to the structure!")
-        # else:
-        #     print("The structure was modified!")
-
-        # print(self.lw)
 
         # Construct a larger cell by repeating image_cell in both directions
         img_tiled = np.tile(img_cell,(1,4))
