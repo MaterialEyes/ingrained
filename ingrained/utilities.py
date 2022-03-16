@@ -27,6 +27,41 @@ def enablePrint():
     sys.stdout = sys.__stdout__
     
     
+    
+def compareAngles(z_below,z_above,sim_obj,exp_img,interval=10):
+    """
+    Function to quickly test which angle is the best fit for the system.
+    As no optimiziation occurs, one should be careful when using this
+    function to determine the best initial angle for the full ingrained
+    optimization run.
+    
+    Inputs:
+        z_below (float): Thickness or depth from top in (Angstrom)
+        z_above (float): Distance above the surface to consider (Angstrom)
+        sim_obg (ingrained.strucutre): PartialCharge object
+        exp_img (ingrained.image_ops): Experimental image fit against
+        interval (int): The interval of angles to rotate through
+    """
+    
+    rhos, nzmax = sim_obj._get_stm_vol(z_below,z_above)
+    
+    score_list=[]
+    for ang in range(0,360,interval):
+        cb = CongruityBuilder(sim_obj=sim_obj,exp_img=exp_img['Pixels'])
+        score = cb.taxicab_ssim_objective([z_below,z_above,rhos.max()*3/4,
+                                              rhos.max()*3/4*.99,
+                                              0,0,0,0,
+                                              ang,
+                                              exp_img["Experiment Pixel Size"],
+                                              0,
+                                              40,40],
+                                              fixed=[[[]]],
+                                              append_summary=False)
+        score_list.append([score,ang])
+    return(score_list)
+    
+    
+
 def multistart(sim_params,num_starts,sim_obj,exp_img,
                 objective='taxicab_ssim',optimizer='Powell',search_mode='',
                 fixed_params=[]):
@@ -76,6 +111,39 @@ def multistart(sim_params,num_starts,sim_obj,exp_img,
             new_input+=[i,sim_obj, exp_img,
                         fixed_params,
                         objective,optimizer,search_mode]
+
+    workers = Pool(processes=num_starts)
+    workers.map(multi_congruity_finder, starts)
+
+def multistart_stm_angle(sim_params,num_starts,sim_obj,exp_img,
+                objective='taxicab_ssim',optimizer='Powell',
+                fixed_params=[],interval=30,cap=180):
+    """
+    Function to facilitate running multiple optimizations at once,
+    focused on rotating the initial image with the same paramenters
+    NOTE: Will not function properly if progress files already exist!!!
+
+
+
+    Args:
+        sim_params (list): The initial parameters to use
+        num_starts (int) : The number of optimizations to run
+                           in parallel
+        sim_obj (PartialCharge): PARCHG to use as reference
+        exp_img (2x2 array)    : Array representing the
+                                 experimental image
+        fixed_params (list): List of sim_param indexes to keep fixed
+
+    """
+    starts=[]
+    for i in range(0,cap+1,interval):
+            new_input=list(sim_params)
+            new_input[9]=i
+            new_input+=[i,sim_obj, exp_img,
+                        fixed_params,
+                        objective,optimizer,'stm']
+            starts.append(new_input)
+
 
     workers = Pool(processes=num_starts)
     workers.map(multi_congruity_finder, starts)
@@ -138,6 +206,54 @@ def locate_frame(idx,progress,search_mode,congruity,
         + ".png",
     )
 
+
+def height_profiles(sim_img,pix_size,resolution=40):
+        """
+        Obtain information on the height profiles between peaks        
+
+        Args:
+            resolution (int): The number of points to sample in the profile
+            pix_size (float): The width of image over number of pixels
+            save (Boolean): Whether to save the height profile as an image
+
+        Returns:
+            list (list): List of heights, terminated by length of the profile
+        """
+        
+        img=sim_img
+        max_ind=[]
+        # Get the maximum height in the array
+        max_height = np.matrix(img).max()
+        for i in range(len(img)):
+            for j in range(len(img[i])):
+                # If the height of the index is within a tolerance
+                if max_height-img[i][j]<1E-3:
+                    max_ind.append(np.array([i,j]))
+        print(len(max_ind))
+        all_profiles = []
+        # Using the first index as the starting point
+        for ind in max_ind[1:]:
+            profiles = []
+            start = ind
+            end   = max_ind[0]
+            for i in range(resolution+1):
+
+                new_ind = (end-start)*i/40+start
+                # Get the index bounds
+                top, bot, left, right = int(new_ind[0]+1),\
+                                        int(new_ind[0]),\
+                                        int(new_ind[1]),\
+                                        int(new_ind[1]+1)
+                # Scale using lever rule
+                val=sum([img[top][left]*(new_ind[0]-bot)*(right-new_ind[1]),
+                         img[top][right]*(new_ind[0]-bot)*(new_ind[1]-left),
+                         img[bot][left]*(top-new_ind[0])*(right-new_ind[1]),
+                         img[bot][right]*(top-new_ind[0])*(new_ind[1]-left)])
+                profiles.append(val)
+            length = np.linalg.norm(end-start)*pix_size
+            profiles.append(length)
+            all_profiles.append(profiles)
+        return(all_profiles)
     
     
 
@@ -261,31 +377,6 @@ def print_frames(config_file="", poscar_file="", exp_img="", exp_title="",
     time.sleep(1)
     Printer("")
 
-
-def heights(sim_img,start_pix=[0, 0], end_pix=[1, 1], savename="heights.png"):
-    """
-    Plot the height at each pixel between two pixel values
-    args:
-        sim_img   (array): simulated image
-        start_pix (array): Starting pixel for plot
-        end_pix   (array): End pixel for plot
-        savename (string): Name to give file
-    """
-
-    heights = []
-    for i in range(
-        int(min([end_pix[0] - start_pix[0], end_pix[1] - start_pix[1]])) + 1
-    ):
-        i /= int(min([end_pix[0] - start_pix[0], end_pix[1] - start_pix[1]]))
-        new_pix = [int((end_pix[0] - start_pix[0]) * i),
-                   int((end_pix[1] - start_pix[1]) * i)]
-        heights.append(sim_img[start_pix[0] + \
-                               new_pix[0]][start_pix[1] + \
-                                           new_pix[1]])
-    heights = np.array(heights) - min(heights)
-    plt.plot(heights)
-    plt.title("Max Height Difference = " + str(round(max(heights), 3)) + " $\AA$")
-    plt.savefig("heights.pdf", bbox_inches="tight")
 
 
 def prepare_fantastx_input(
