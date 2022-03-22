@@ -230,7 +230,6 @@ def height_profiles(sim_img,pix_size,prec=1E-3,center_index=0,resolution=40):
                 if max_height-img[i][j]<prec:
                     max_ind.append(np.array([i,j]))
         all_profiles = []
-        print(max_ind)
         # Using the first index as the starting point
         for ind in [i for i in range(len(max_ind)) if i!=center_index]:
             profiles = []
