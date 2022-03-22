@@ -207,7 +207,7 @@ def locate_frame(idx,progress,search_mode,congruity,
     )
 
 
-def height_profiles(sim_img,pix_size,resolution=40):
+def height_profiles(sim_img,pix_size,prec=1E-3,center_index=0,resolution=40):
         """
         Obtain information on the height profiles between peaks        
 
@@ -227,15 +227,16 @@ def height_profiles(sim_img,pix_size,resolution=40):
         for i in range(len(img)):
             for j in range(len(img[i])):
                 # If the height of the index is within a tolerance
-                if max_height-img[i][j]<1E-3:
+                if max_height-img[i][j]<prec:
                     max_ind.append(np.array([i,j]))
-        print(len(max_ind))
         all_profiles = []
+        print(max_ind)
         # Using the first index as the starting point
-        for ind in max_ind[1:]:
+        for ind in [i for i in range(len(max_ind)) if i!=center_index]:
             profiles = []
-            start = ind
-            end   = max_ind[0]
+            start = max_ind[ind]
+            end   = max_ind[center_index]
+            start,end = np.array(start),np.array(end)
             for i in range(resolution+1):
 
                 new_ind = (end-start)*i/40+start
