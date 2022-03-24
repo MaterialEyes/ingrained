@@ -560,7 +560,7 @@ class CongruityBuilder(object):
         plt.subplots_adjust(left=0.03, right=0.97, top=0.98, bottom=0.02)
         
 
-        plt.savefig(savename, dpi=400)
+        plt.savefig(savename, dpi=400,bbox_inches='tight')
         plt.close()
 
     def taxicab_ssim_objective(self, x, fixed,append_summary=True):
