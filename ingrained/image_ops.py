@@ -365,7 +365,7 @@ def read_tif_file(tif_path):
         A dict containing the raw pixel values and the pixel size information
     """
     d = {}
-    d["Pixels"] = plt.imread(tif_path)[:, :, 0]
+    d["Pixels"] = plt.imread(tif_path)[:, :]
     d["Experiment Pixel Size"] = ""
     return d
 
