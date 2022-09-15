@@ -54,7 +54,7 @@ def compareAngles(z_below,z_above,sim_obj,exp_img,interval=10):
                                               ang,
                                               exp_img["Experiment Pixel Size"],
                                               0,
-                                              40,40],
+                                              37,37],
                                               fixed=[[[]]],
                                               append_summary=False)
         score_list.append([score,ang])
@@ -231,6 +231,8 @@ def height_profiles(sim_img,pix_size,prec=1E-3,center_index=0,resolution=40):
                     max_ind.append(np.array([i,j]))
         all_profiles = []
         # Using the first index as the starting point
+        print(max_ind[center_index],'!!!!!')
+        print(max_ind)
         for ind in [i for i in range(len(max_ind)) if i!=center_index]:
             profiles = []
             start = max_ind[ind]
@@ -240,10 +242,10 @@ def height_profiles(sim_img,pix_size,prec=1E-3,center_index=0,resolution=40):
 
                 new_ind = (end-start)*i/40+start
                 # Get the index bounds
-                top, bot, left, right = int(new_ind[0]+1),\
-                                        int(new_ind[0]),\
-                                        int(new_ind[1]),\
-                                        int(new_ind[1]+1)
+                top, bot, left, right = int(new_ind[0]),\
+                                        int(new_ind[0]-1),\
+                                        int(new_ind[1]-1),\
+                                        int(new_ind[1])
                 # Scale using lever rule
                 val=sum([img[top][left]*(new_ind[0]-bot)*(right-new_ind[1]),
                          img[top][right]*(new_ind[0]-bot)*(new_ind[1]-left),
