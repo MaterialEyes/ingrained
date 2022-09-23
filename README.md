@@ -276,16 +276,18 @@ bash make_movie.sh
 ## Citation
 If you find this code useful, please consider citing our [paper](#paper)
 ```sh
-@article{,
-  title={},
-  author={},
-  journal={},
-  volume={},
-  number={},
-  pages={},
-  year={},
-  publisher={}
+@article{Schwenker2022,
+author = {Schwenker, Eric and Kolluru, Venkata Surya Chaitanya and Guo, Jinglong and Zhang, Rui and Hu, Xiaobing and Li, Qiucheng and Paul, Joshua T. and Hersam, Mark C. and Dravid, Vinayak P. and Klie, Robert and Guest, Jeffrey R. and Chan, Maria K. Y.},
+title = {Ingrained: An Automated Framework for Fusing Atomic-Scale Image Simulations into Experiments},
+journal = {Small},
+volume = {18},
+number = {19},
+pages = {2102960},
+keywords = {image registration, materials image simulations, microscopy automation},
+doi = {https://doi.org/10.1002/smll.202102960},
+year = {2022}
 }
+
 ```
 
 ## Acknowledgements <a name="credits"></a>
