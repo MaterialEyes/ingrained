@@ -38,7 +38,7 @@ def compareAngles(z_below,z_above,sim_obj,exp_img,interval=10):
     Inputs:
         z_below (float): Thickness or depth from top in (Angstrom)
         z_above (float): Distance above the surface to consider (Angstrom)
-        sim_obg (ingrained.strucutre): PartialCharge object
+        sim_obg (ingrained.structure): PartialCharge object
         exp_img (ingrained.image_ops): Experimental image fit against
         interval (int): The interval of angles to rotate through
     """
@@ -54,7 +54,9 @@ def compareAngles(z_below,z_above,sim_obj,exp_img,interval=10):
                                               ang,
                                               exp_img["Experiment Pixel Size"],
                                               0,
-                                              37,37],
+                                              int(len(exp_img['Pixels'])/2),
+                                              int(len(exp_img['Pixels'][0])/2)
+                                              ],
                                               fixed=[[[]]],
                                               append_summary=False)
         score_list.append([score,ang])
@@ -231,8 +233,6 @@ def height_profiles(sim_img,pix_size,prec=1E-3,center_index=0,resolution=40):
                     max_ind.append(np.array([i,j]))
         all_profiles = []
         # Using the first index as the starting point
-        print(max_ind[center_index],'!!!!!')
-        print(max_ind)
         for ind in [i for i in range(len(max_ind)) if i!=center_index]:
             profiles = []
             start = max_ind[ind]
