@@ -298,9 +298,11 @@ def height_profiles(sim_img,pix_size,prec=1E-3,center_index=0,resolution=40):
         Obtain information on the height profiles between peaks        
 
         Args:
-            resolution (int): The number of points to sample in the profile
+            sim_img (object): Simulated STM image
             pix_size (float): The width of image over number of pixels
-            save (Boolean): Whether to save the height profile as an image
+            prec (float)    : The tolerance for identifying height peaks (Å)
+            center_index(int):Which peak to use as the starting point for plot
+            resolution (int): The number of points to sample in the profile
 
         Returns:
             list (list): List of heights, terminated by length of the profile
@@ -324,7 +326,7 @@ def height_profiles(sim_img,pix_size,prec=1E-3,center_index=0,resolution=40):
             start,end = np.array(start),np.array(end)
             for i in range(resolution+1):
 
-                new_ind = (end-start)*i/40+start
+                new_ind = (end-start)*i/resolution+start
                 # Get the index bounds
                 top, bot, left, right = int(new_ind[0]),\
                                         int(new_ind[0]-1),\
