@@ -218,7 +218,7 @@ class PartialCharge(object):
         """
         # Enforce max stretch/squeeze and max/min 
         # shear value (both directions 0.30)  
-        bound=0.20
+        bound=0.10
         sim_params[4] = sorted((-bound, sim_params[4], bound))[1]
         sim_params[5] = sorted((-bound, sim_params[5], bound))[1]
         sim_params[6] = sorted((-bound, sim_params[6], bound))[1]
@@ -227,10 +227,10 @@ class PartialCharge(object):
         sim_params[8] = sorted((-360, sim_params[8], 360))[1]
         # If the pixel size was set, ensure it was clamped
         if self.pix_size!=None:
-            sim_params[9]=sorted(0.9*self.pix_size,sim_params[9],
-                                 1.1*self.pix_size)[1]
+            sim_params[9]=sorted((0.9*self.pix_size,sim_params[9],
+                                 1.1*self.pix_size))[1]
         # Clamp blurring
-        sim_params[10] = sorted((0, sim_params[10], 8))[1]
+        sim_params[10] = sorted((0, sim_params[10], 4))[1]
 
         # Simulate the image cell
         self._get_stm_cell(z_below=sim_params[0], z_above=sim_params[1], 
