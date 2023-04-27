@@ -87,29 +87,29 @@ def multistart(sim_params,num_starts,sim_obj,exp_img,
     rand = np.random
     if search_mode=='stm':
         for i in range(num_starts):
-            zcap = .25*sim_obj.structure.lattice.c
+            zcap=sim_params[1]
             new_input=[sim_params[0]*rand.random(),
-                       zcap/2+zcap/2*rand.random()]
+                       zcap*(1./2+1./2*rand.random())]
             rhos, nzmax = sim_obj._get_stm_vol(new_input[0],
                                                new_input[1])
-            new_input.append(rhos.max()/3+rhos.max()*2/3*rand.random())
+            new_input.append(rhos.max()*(1./3+2./3*rand.random()))
             new_input.append(new_input[2]*.98)
             new_input+=sim_params[4:10]
-            new_input.append(1+2*rand.random())
-            new_input+=[sim_params[11]*.9+sim_params[11]*.2*rand.random(),
-                        sim_params[12]*.9+sim_params[12]*.2*rand.random()]
+            new_input.append(sim_params[10]/2*(1+0.5*rand.random()))
+            new_input+=[sim_params[11]*(.9+.2*rand.random()),
+                        sim_params[12]*(.9+.2*rand.random())]
             new_input+=[i,sim_obj, exp_img,
                         fixed_params,
                         objective,optimizer,search_mode]
             starts.append(new_input)
     elif search_mode=='gb':
         for i in range(num_starts):
-            new_input=[sim_params[0]*.95+sim_params[0]*.1*rand.random(),
-                       rand.random(),
-                       2*rand.random()]
+            new_input=[sim_params[0]*(.95+.1*rand.random()),
+                       sim_params[1]*rand.random(),
+                       sim_params[2]*rand.random()]
             new_input+=sim_params[4:8]
-            new_input+=[sim_params[9]*.9+sim_params[9]*.2*rand.random(),
-                        sim_params[10]*.9+sim_params[10]*.2*rand.random()]
+            new_input+=[sim_params[9]*(.9+.2*rand.random()),
+                        sim_params[10]*(.9+.2*rand.random())]
             new_input+=[i,sim_obj, exp_img,
                         fixed_params,
                         objective,optimizer,search_mode]
@@ -195,7 +195,7 @@ def multistart_stm_angle(sim_params,num_starts,sim_obj,exp_img,
     starts=[]
     for i in range(0,cap+1,interval):
             new_input=list(sim_params)
-            new_input[9]=i
+            new_input[8]=i
             new_input+=[i,sim_obj, exp_img,
                         fixed_params,
                         objective,optimizer,'stm']
@@ -418,7 +418,11 @@ def print_frames(config_file="", poscar_file="", exp_img="", exp_title="",
                               congruity,cmap,describe_frames,save_path,bias_y)
 
     elif decision.lower() == "best":
+        prog_list = progress
         best_idx = int(np.argmin(progress[:, -1]))
+        while str(prog_list[best_idx][-1])=='nan':
+            prog_list=np.delete(prog_list,best_idx,0)
+            best_idx = int(np.argmin(prog_list[:, -1]))
         locate_frame(best_idx,progress,search_mode,
                               congruity,cmap,describe_frames,save_path,bias_y)
 
