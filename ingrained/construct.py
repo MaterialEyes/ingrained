@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from scipy.spatial import KDTree, Delaunay, distance_matrix
 
 # pymatgen tools
-from pymatgen.ext.matproj import MPRester
+from mp_api.client import MPRester
 from pymatgen.io.xyz import XYZ
 from pymatgen.io.ase import AseAtomsAdaptor
 from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
@@ -29,9 +29,8 @@ class Slab(object):
             A pymatgen conventional standard unit cell
         """
         mpr = MPRester("MAPI_KEY")
-        query = mpr.query(criteria={"pretty_formula": self.chemical_formula}, 
-                          properties=["structure","icsd_ids","spacegroup"])
-        
+        query = mpr.summary.search(formula=self.chemical_formula,
+                            fields=["structure","icsd_ids","spacegroup"])
         # First filter by space_group if provided 
         if self.space_group:
             query = [query[i] for i in range(len(query)) if 
