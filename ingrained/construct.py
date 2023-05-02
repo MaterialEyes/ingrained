@@ -28,7 +28,7 @@ class Slab(object):
         Returns:
             A pymatgen conventional standard unit cell
         """
-        mpr = MPRester("MAPI_KEY")
+        mpr = MPRester("8qZ7ZYC8Bv7S2PRz2enW7hxBiSkbbsKi")
         query = mpr.summary.search(formula=self.chemical_formula,
                             fields=["structure","icsd_ids","spacegroup"])
         # First filter by space_group if provided 

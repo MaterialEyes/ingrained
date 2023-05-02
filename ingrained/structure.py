@@ -940,7 +940,8 @@ class Bicrystal(object):
         
         # Simulate image with Kirkland incostem
         with cd(os.getcwd()+'/simulation'):
-            subprocess.call("./incostem-osx", stdout=subprocess.PIPE)
+            subprocess.call("./incostem-linux", stdout=subprocess.PIPE)
+            #subprocess.call("./incostem-osx", stdout=subprocess.PIPE)
 
         image = np.array(plt.imread(os.getcwd()+\
                                   '/simulation/SAMPLE.TIF')).astype(np.float64)

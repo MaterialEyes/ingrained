@@ -305,7 +305,7 @@ class CongruityBuilder(object):
 
         # Keep track of the current best index and shift score
         current_best = None
-
+        
         for i in range(np.sum(similarity_map > 0)):
 
             # Get patch of fixed image that contains current_idx 
@@ -488,7 +488,7 @@ class CongruityBuilder(object):
 
         # Will make heights the same but keep aspect ratio
         fac = np.shape(fixed)[0] / np.shape(moving)[0]
-        new_size =np.round((fac * np.array(np.shape(moving))),0).astype(np.int)
+        new_size =np.round((fac * np.array(np.shape(moving))),0).astype(int)
         moving = iop.apply_resize(moving, new_size)
 
         # Add border to simulation so appears uniform next 
@@ -703,12 +703,13 @@ class CongruityBuilder(object):
         except Exception as e:
             print(e)
             sim_img = None
-
+        
         if sim_img is not None:
             match_ssim = iop.score_ssim(sim_img, exp_patch)
             fom = 0.1 * (shift_score) + match_ssim
         else:
             fom = 9999
+        
         summary = self.sim_obj.simulation_summary(self.iter)
         summary = summary + "\n       🌀 FOM                       :  {}\n".format(fom)
         # Print for viewing progress
