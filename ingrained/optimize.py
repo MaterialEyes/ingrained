@@ -488,7 +488,7 @@ class CongruityBuilder(object):
 
         # Will make heights the same but keep aspect ratio
         fac = np.shape(fixed)[0] / np.shape(moving)[0]
-        new_size =np.round((fac * np.array(np.shape(moving))),0).astype(np.int)
+        new_size =np.round((fac * np.array(np.shape(moving))),0).astype(int)
         moving = iop.apply_resize(moving, new_size)
 
         # Add border to simulation so appears uniform next 
