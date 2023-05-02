@@ -904,7 +904,7 @@ class Bicrystal(object):
 
         # Use pixel_size to define shape of the output image 
         pixx, pixy = np.round(np.array(bc.lattice.abc)/\
-                                                  pix_size)[1::].astype(np.int)
+                                                  pix_size)[1::].astype(int)
         
         fmt = '% 4d', '% 8.4f', '% 9.4f', '% 9.4f', '% 4.2f', '% 4.3f'
         # Write input structure file required for Kirkland STEM simulation
