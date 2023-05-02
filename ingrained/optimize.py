@@ -234,7 +234,7 @@ class CongruityBuilder(object):
         # Compute normalized windowed histogram feature vector for 
         # each pixel in the fixed image
         px_histograms = rank.windowed_histogram(
-            fixed, selem=selem, n_bins=moving_hist.shape[0]
+            fixed, footprint=selem, n_bins=moving_hist.shape[0]
         )
 
         # Reshape moving histogram to (1,1,N) for broadcast when we 

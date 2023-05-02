@@ -34,13 +34,13 @@ class Slab(object):
         # First filter by space_group if provided 
         if self.space_group:
             query = [query[i] for i in range(len(query)) if 
-                     SpacegroupAnalyzer(query[i]['structure']).get_space_group_symbol()==self.space_group]
+                     SpacegroupAnalyzer(query[i].structure).get_space_group_symbol()==self.space_group]
 
         # Select minimum volume:
-        selected = query[np.argmin([query[i]['structure'].lattice.volume for 
+        selected = query[np.argmin([query[i].structure.lattice.volume for 
                                                       i in range(len(query))])]
 
-        pymatgen_structure = SpacegroupAnalyzer(selected["structure"]
+        pymatgen_structure = SpacegroupAnalyzer(selected.structure
                                         ).get_conventional_standard_structure()
         return pymatgen_structure
 
