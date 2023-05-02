@@ -105,14 +105,15 @@ def multistart(sim_params,num_starts,sim_obj,exp_img,
     elif search_mode=='gb':
         for i in range(num_starts):
             new_input=[sim_params[0]*(.95+.1*rand.random()),
-                       sim_params[1]*rand.random(),
-                       sim_params[2]*rand.random()]
-            new_input+=sim_params[4:8]
-            new_input+=[sim_params[9]*(.9+.2*rand.random()),
-                        sim_params[10]*(.9+.2*rand.random())]
+                       sim_params[1]*(.95+.1*rand.random()),
+                       sim_params[2]*(.95+.1*rand.random())]
+            new_input+=sim_params[3:7]
+            new_input+=[sim_params[7]*(.9+.2*rand.random()),
+                        sim_params[8]*(.9+.2*rand.random())]
             new_input+=[i,sim_obj, exp_img,
                         fixed_params,
                         objective,optimizer,search_mode]
+            starts.append(new_input)
 
     print(len(starts[0]))
     workers = Pool(processes=num_starts)
@@ -158,12 +159,12 @@ def multistart_series(sim_params,num_starts,sim_obj,exp_img,
             starts.append(new_input)
     elif search_mode=='gb':
         for i in range(num_starts):
-            new_input=[sim_params[0]*.95+sim_params[0]*.1*rand.random(),
-                       rand.random(),
-                       2*rand.random()]
-            new_input+=sim_params[4:8]
-            new_input+=[sim_params[9]*.9+sim_params[9]*.2*rand.random(),
-                        sim_params[10]*.9+sim_params[10]*.2*rand.random()]
+            new_input=[sim_params[0]*(.95+.1*rand.random()),
+                       sim_params[1]*(.95+.1*rand.random()),
+                       sim_params[2]*(.95+.1*rand.random())]
+            new_input+=sim_params[3:7]
+            new_input+=[sim_params[7]*(.9+.2*rand.random()),
+                        sim_params[8]*(.9+.2*rand.random())]
             new_input+=[i,sim_obj, exp_img,
                         fixed_params,
                         objective,optimizer,search_mode]
@@ -215,10 +216,9 @@ def multi_congruity_finder(start_inputs):
         (counter,sim_obj,exp_img,fixed_index,
              objective,optimizer,search_mode)=start_inputs[13:]
     elif start_inputs[-1]=='gb':
-        initial_solution=start_inputs[:11]
+        initial_solution=start_inputs[:9]
         (counter,sim_obj,exp_img,fixed_index,
-             objective,optimizer,search_mode)=start_inputs[11:]
-        
+             objective,optimizer,search_mode)=start_inputs[9:]
     congruity = CongruityBuilder(sim_obj=sim_obj, exp_img=exp_img)
     congruity.find_correspondence(objective=objective, optimizer=optimizer,
                                   initial_solution=initial_solution,
@@ -241,7 +241,7 @@ def multi_congruity_finder_series(start_inputs_list,path):
             (counter,sim_obj,exp_img,fixed_index,
                  objective,optimizer,search_mode)=start_inputs[13:]
         elif start_inputs[-1]=='gb':
-            initial_solution=start_inputs[:11]
+            initial_solution=start_inputs[:9]
             (counter,sim_obj,exp_img,fixed_index,
                  objective,optimizer,search_mode)=start_inputs[11:]
         congruity = CongruityBuilder(sim_obj=sim_obj, exp_img=exp_img)
