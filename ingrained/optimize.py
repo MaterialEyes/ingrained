@@ -475,13 +475,13 @@ class CongruityBuilder(object):
         rcrds = iop.pixels_within_rectangle(
             int(critical_idx[1] - (ncols - 1) / 2),
             int(critical_idx[0] - (nrows - 1) / 2),
-            ncols,
-            nrows,
+            ncols-1,
+            nrows-1,
         )
 
         base_img = fixed.copy()
         filler = moving.flatten("F")
-
+        
         for i in range(len(rcrds)):
             entry = rcrds[i]
             base_img[entry[1], entry[0]] = filler[i]
