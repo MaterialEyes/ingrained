@@ -121,7 +121,7 @@ def multistart(sim_params,num_starts,sim_obj,exp_img,
 
 def multistart_series(sim_params,num_starts,sim_obj,exp_img,
                 objective='taxicab_ssim',optimizer='Powell',search_mode='',
-                fixed_params=[],path=''):
+                fixed_params=[]):
     """
     Function to facilitate running multiple optimizations at once
     NOTE: Will not function properly if progress files already exist!!!
@@ -169,7 +169,7 @@ def multistart_series(sim_params,num_starts,sim_obj,exp_img,
                         fixed_params,
                         objective,optimizer,search_mode]
 
-    multi_congruity_finder_series(starts,path)
+    multi_congruity_finder_series(starts)
 
 
 
@@ -226,13 +226,11 @@ def multi_congruity_finder(start_inputs):
                                   search_mode=search_mode,
                                   counter=counter)
 
-def multi_congruity_finder_series(start_inputs_list,path):
+def multi_congruity_finder_series(start_inputs_list):
     """
     Helper function for the 'multistart_series' function to 
     run ingrained in series
     
-    Variables:
-        path (str): Path to where to write the files
     """
     for start_inputs in start_inputs_list:
         print(start_inputs)
@@ -249,7 +247,7 @@ def multi_congruity_finder_series(start_inputs_list,path):
                                       initial_solution=initial_solution,
                                       fixed_params=fixed_index,
                                       search_mode=search_mode,
-                                      counter=counter,path=path)
+                                      counter=counter)
 
 
 
