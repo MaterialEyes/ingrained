@@ -243,12 +243,23 @@ def multi_congruity_finder_series(start_inputs_list):
             (counter,sim_obj,exp_img,fixed_index,
                  objective,optimizer,search_mode)=start_inputs[11:]
         congruity = CongruityBuilder(sim_obj=sim_obj, exp_img=exp_img)
-        congruity.find_correspondence(objective=objective, optimizer=optimizer,
+
+        try:
+            congruity.find_correspondence(objective=objective, optimizer=optimizer,
                                       initial_solution=initial_solution,
                                       fixed_params=fixed_index,
                                       search_mode=search_mode,
                                       counter=counter)
-
+        except:
+            rhos, nzmax = sim_obj._get_stm_vol(start_inputs[0],
+                                               start_inputs[1])
+            initial_solution[2]=(rhos.max()*(1./3+2./3*rand.random()))
+            initial_solution[3]=(initial_solution[2]*.98)
+            congruity.find_correspondence(objective=objective, optimizer=optimizer,
+                                      initial_solution=initial_solution,
+                                      fixed_params=fixed_index,
+                                      search_mode=search_mode,
+                                      counter=counter)
 
 
 
