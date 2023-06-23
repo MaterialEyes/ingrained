@@ -233,7 +233,6 @@ def multi_congruity_finder_series(start_inputs_list):
     
     """
     for start_inputs in start_inputs_list:
-        print(start_inputs)
         if start_inputs[-1]=='stm':
             initial_solution=start_inputs[:13]
             (counter,sim_obj,exp_img,fixed_index,
@@ -253,7 +252,7 @@ def multi_congruity_finder_series(start_inputs_list):
         except:
             rhos, nzmax = sim_obj._get_stm_vol(start_inputs[0],
                                                start_inputs[1])
-            initial_solution[2]=(rhos.max()*(1./3+2./3*rand.random()))
+            initial_solution[2]=(rhos.max()*(1./3+2./3*np.random.random()))
             initial_solution[3]=(initial_solution[2]*.98)
             congruity.find_correspondence(objective=objective, optimizer=optimizer,
                                       initial_solution=initial_solution,
