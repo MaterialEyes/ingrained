@@ -892,6 +892,11 @@ class Bicrystal(object):
             A pymatgen structure with interface and collision adjustments
         """
 
+        # Store the initial current directory
+        init_dir = os.getcwd()
+        # change to Ingrained /simulation directory
+        os.chdir(os.path.dirname(__file__)+'/simulation')
+
         # Get copy of current structure
         bc =self.structure.copy() 
         
@@ -908,7 +913,7 @@ class Bicrystal(object):
         
         fmt = '% 4d', '% 8.4f', '% 9.4f', '% 9.4f', '% 4.2f', '% 4.3f'
         # Write input structure file required for Kirkland STEM simulation
-        with open(os.getcwd()+'/simulation/SAMPLE.XYZ', "w") as sf:
+        with open('SAMPLE.XYZ', "w") as sf:
             sf.write('Kirkland incostem input format\n')
             sf.write(" "*5+"".join(str(format(word, '8.4f')).ljust(10) for 
                                    word in [bc.lattice.b,bc.lattice.c,
@@ -933,22 +938,21 @@ class Bicrystal(object):
         #        cf.write(str(bc.species[idx])+" "+"".join(str(format(word, '8.6f')).ljust(10) for word in [atom_position[0],atom_position[1],atom_position[2]])+"\n")
 
         # Write parameter file required for Kirkland STEM simulation
-        with open(os.getcwd()+'/simulation/params.txt', "w") as pf:
+        with open('params.txt', "w") as pf:
             pf.write('SAMPLE.XYZ\n1 1 1\nSAMPLE.TIF\n'+str(pixx)+" "+\
                                                                str(pixy)+"\n")            
             pf.write("200 0 0 0 30\n100 150\nEND\n"+str(defocus)+"\n0")             
         
         # Simulate image with Kirkland incostem
-        with cd(os.getcwd()+'/simulation'):
-            subprocess.call("./incostem-linux", stdout=subprocess.PIPE)
-            #subprocess.call("./incostem-osx", stdout=subprocess.PIPE)
+        with open('params.txt') as inp:
+            subprocess.Popen(["incostem-linux"], stdout=subprocess.PIPE, stdin=inp).communicate()
+            #subprocess.Popen(["incostem-osx"], stdout=subprocess.PIPE, stdin=inp).communicate()
 
-        image = np.array(plt.imread(os.getcwd()+\
-                                  '/simulation/SAMPLE.TIF')).astype(np.float64)
+        image = np.array(plt.imread('SAMPLE.TIF')).astype(np.float64)
 
-        os.remove(os.getcwd()+'/simulation/SAMPLE.XYZ')
-        os.remove(os.getcwd()+'/simulation/SAMPLE.TIF')
-        os.remove(os.getcwd()+'/simulation/params.txt')
+        os.remove('SAMPLE.XYZ')
+        os.remove('SAMPLE.TIF')
+        os.remove('params.txt')
 
         if view:
             plt.imshow(image,cmap='hot'); plt.axis('off')
@@ -957,6 +961,8 @@ class Bicrystal(object):
         self.cell = image
         self.lw = (bc.lattice.b/np.shape(image)[1],
                    bc.lattice.c/np.shape(image)[0])
+        
+        os.chdir(init_dir)
 
         return image, bc
         

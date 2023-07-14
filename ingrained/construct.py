@@ -1,4 +1,5 @@
 import os
+import warnings
 import numpy as np
 import itertools as it
 import matplotlib.pyplot as plt
@@ -203,7 +204,7 @@ class Slab(object):
         
         """
         
-        if position_filt != []:
+        if list(position_filt) != []:
             if direction=='width':
                 # Find index of closest_b (not in column)
                 cb_idx = np.argmin(np.abs(position_filt[:,1]-\
