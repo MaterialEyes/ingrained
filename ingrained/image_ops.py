@@ -269,8 +269,8 @@ def score_ssim(img1, img2):
     """
     img1 = scale_pixels(img1, mode="rescale")
     img2 = scale_pixels(img2, mode="rescale")
-    return 1 - ssim(img1, img2)
-
+    im_max, im_min = max(img1.max(), img2.max()), min(img1.min(), img2.min())
+    return 1 - ssim(img1, img2, data_range=im_max-im_min)
 
 def open_construction_file(slab_path):
     """
