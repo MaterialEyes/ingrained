@@ -433,6 +433,32 @@ def print_frames(config_file="", poscar_file="", exp_img="", exp_title="",
             best_idx = int(np.argmin(prog_list[:, -1]))
         locate_frame(best_idx,progress,search_mode,
                               congruity,cmap,describe_frames,save_path,bias_y)
+        
+    elif (
+        len(str(decision.lower()).split("-")) > 1
+        and "best" in decision.lower()
+    ):
+        n_needed = int(str(decision.lower()).split("-")[0])
+        prog_list = progress[np.argsort(progress[:, -1])]
+        n_best_idxs = []
+        for row_i in range(prog_list.shape[0]):
+            # check if this entry matches with current entries in n_best_idxs
+            is_uniq = True
+            for row_j in n_best_idxs:
+                diff = prog_list[row_i, 1:] - prog_list[row_j, 1:]
+                diff[diff<0.01] = 0
+                if not np.count_nonzero(diff) > 0:
+                    is_uniq = False
+            # if unique, get idx of this row in progress array
+            if is_uniq:
+                #prog_idx = np.where(progress == prog_list[row_i])
+                # add progress_idx to n_best_idxs
+                n_best_idxs.append(row_i)
+                print (n_best_idxs)
+                #locate_frame(i,prog_list,search_mode,
+                #            congruity,cmap,describe_frames,save_path,bias_y)
+            if len(n_best_idxs) == n_needed:
+                break
 
     elif decision.lower() == "final":
         final_idx = np.shape(progress)[0] - 1
