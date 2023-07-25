@@ -512,7 +512,8 @@ class Bicrystal(object):
     together into a bicrystal, simulate a convolution HAADF STEM image, 
     and perform postprocessing imaging manipulations.
     """
-    def __init__(self, config_file="", write_poscar=False, poscar_file=""):
+    def __init__(self, config_file="", write_poscar=False, poscar_file="", 
+                 top_grain_unit_cell=None, bot_grain_unit_cell=None):
         """
         Initialize a Bicrystal object with the path to 
         a bicrystal slabs (json) file.
@@ -552,7 +553,8 @@ class Bicrystal(object):
                                      self.slab_1['uvw_upward'],
                                      self.slab_1['tilt_angle'],
                                      self.slab_1['max_dimension'],
-                                     self.slab_1['flip_species'])
+                                     self.slab_1['flip_species'],
+                                     bulk_unit_cell=top_grain_unit_cell)
                 
                 # Actual structure for the bottom grain 
                 # (slab positioned into bottom of bicrystal cell)
@@ -562,7 +564,8 @@ class Bicrystal(object):
                                         self.slab_2['uvw_upward'],
                                         self.slab_2['tilt_angle'],
                                         self.slab_2['max_dimension'],
-                                        self.slab_2['flip_species'])         
+                                        self.slab_2['flip_species'], 
+                                        bulk_unit_cell=bot_grain_unit_cell)         
             
                 structure, top_grain_fit, bot_grain_fit, strain_info = \
                     self._get_base_structure(top_grain, bot_grain, constraints)

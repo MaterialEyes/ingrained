@@ -7,15 +7,22 @@ from scipy.spatial import KDTree, Delaunay, distance_matrix
 
 # pymatgen tools
 from mp_api.client import MPRester
+from pymatgen.core.structure import Structure
 from pymatgen.io.xyz import XYZ
 from pymatgen.io.ase import AseAtomsAdaptor
 from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
 
 class Slab(object):                   
-    def __init__(self, chemical_formula, space_group, uvw_project, uvw_upward, tilt_angle, max_dimension): 
+    def __init__(self, chemical_formula, space_group, uvw_project, uvw_upward, tilt_angle, max_dimension, bulk_unit_cell=None):
         self.chemical_formula = chemical_formula
         self.space_group = space_group
-        self.unit_cell = self._query_MP()
+        if bulk_unit_cell is not None:
+            if isinstance(bulk_unit_cell, Structure):
+                self.unit_cell = bulk_unit_cell
+            else:
+                print ("bulk_unit_cell should be an instance of pymatgen Structure")
+        else:
+            self.unit_cell = self._query_MP()
         self.slab = self.construct_oriented_slab(uvw_project, uvw_upward, tilt_angle, max_dimension)
         self.width, self.width_tol = self.get_repeat_dist(direction="width")
         self.depth, self.depth_tol = self.get_repeat_dist(direction="depth")
@@ -312,9 +319,9 @@ class Slab(object):
 
 class TopGrain(Slab):
     def __init__(self, chemical_formula, space_group, uvw_project, uvw_upward, 
-                                tilt_angle, max_dimension, flip_species=False):
+                                tilt_angle, max_dimension, flip_species=False, bulk_unit_cell=None):
         super().__init__(chemical_formula, space_group, uvw_project, 
-                                         uvw_upward, tilt_angle, max_dimension)
+                                uvw_upward, tilt_angle, max_dimension, bulk_unit_cell=bulk_unit_cell)
         
         self.height = max_dimension
         self.structure = self.set_in_bicrystal(flip_species=flip_species)
@@ -399,9 +406,9 @@ class TopGrain(Slab):
 
 class BottomGrain(Slab):
     def __init__(self, chemical_formula, space_group, uvw_project, 
-                     uvw_upward, tilt_angle, max_dimension,flip_species=False):
+                    uvw_upward, tilt_angle, max_dimension,flip_species=False, bulk_unit_cell=None):
         super().__init__(chemical_formula, space_group, uvw_project, 
-                                         uvw_upward, tilt_angle, max_dimension)
+                    uvw_upward, tilt_angle, max_dimension, bulk_unit_cell=bulk_unit_cell)
         
         self.height = max_dimension
         self.structure = self.set_in_bicrystal(flip_species=flip_species)
