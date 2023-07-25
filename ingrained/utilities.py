@@ -451,12 +451,11 @@ def print_frames(config_file="", poscar_file="", exp_img="", exp_title="",
                     is_uniq = False
             # if unique, get idx of this row in progress array
             if is_uniq:
-                #prog_idx = np.where(progress == prog_list[row_i])
-                # add progress_idx to n_best_idxs
+                # add row index to n_best_idxs
                 n_best_idxs.append(row_i)
                 print (n_best_idxs)
-                #locate_frame(i,prog_list,search_mode,
-                #            congruity,cmap,describe_frames,save_path,bias_y)
+                locate_frame(row_i,prog_list,search_mode,
+                            congruity,cmap,describe_frames,save_path,bias_y)
             if len(n_best_idxs) == n_needed:
                 break
 
