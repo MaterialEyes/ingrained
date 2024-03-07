@@ -20,6 +20,160 @@ import pySPM
 import dm3_lib as dm3lib
 
 
+def getTipH(w,h,r):
+    """
+    Helper function for getting height difference between
+    the tip at distance x from the tip center and the
+    raised feature of height h from the proposed tip end 
+    point
+
+    Args:
+
+        w (float): lateral distance between tip center and the peak
+           be sure to subtract a half-pixel width, Aangstrom
+        
+        h (float): height difference between proposed tip end point 
+           and the peak height, Aangstrom
+
+        r (float): radius of the tip, Aangstrom
+
+    Returns:
+        
+        (float): The difference in position between the 
+                 curve of the tip and the peak height;
+                 negative values indicate the tip and 
+                 peak are overlapping
+
+    """
+
+    if r<=w:
+        y_tip=h
+    else:
+        #y_tip = np.sin(np.arccos(w/r))*r
+        y_tip = r-np.cos(np.arcsin(w/r))*r
+
+    return(y_tip-h)
+
+def sq_root(x1,x2,y1,y2):
+    """
+    helper funciton for getting square root
+    """
+    return(((x2-x1)**2+(y2-y1)**2)**.5)
+
+def apply_tip_smoothing(img,radius,width,prec=1,bounds=[0,-1]):
+    """
+    Apply smoothing to STM surface plot as if a physical
+    STM tip of smoothness radius were used to measure it
+
+    Args:    
+
+        img (NxM array): the image to be smoothed
+
+        radius (float): the radius of the tip, in Aangstroms
+
+        width (float): how many pixels wide is an Aangstrom; is also 1/pix_size
+
+        prec (float): What is the maximum height above the lowest point
+                      to consider for re-evaluation
+                      
+        bounds (list, 1x2): The range of pixels to consider
+                            when re-evaluating heights. Useful
+                            for when rate limiting peaks are 
+                            over the edge of the original image
+
+    Returns:
+        
+        img (NxM array): the re-scaled image
+
+    """
+
+
+    array = img
+    min_indy,min_indx=np.unravel_index(img.argmin(), img.shape)    
+
+    min_ind=[]
+    min_height = np.matrix(img).min()
+
+
+    # Get the tip radius in pixel units
+    pixRad = max(1,round(radius*width))
+
+    if bounds[0]<0:
+        bounds[0]=len(array)+bounds[0]+1
+    if bounds[1]<0:
+        bounds[1]=len(array)+bounds[1]+1
+    # Get list of indexes to check the new height of
+    for i in range(bounds[0],bounds[1]):
+        for j in range(bounds[0],bounds[1]):
+            # If the height of the index is within a tolerance
+            # in units of Aangstrom
+            if img[i][j]-min_height<=prec:
+                min_ind.append(np.array([i,j]))
+
+    newArray=np.array(array)
+    arrLen=max(len(array),len(array[0]))
+    # If the diameter of the tip is less than the
+    # width of a pixel, no smoothing can occur
+    if 2*radius<1/width:
+        return(array)
+    for site in min_ind:
+        sy,sx=site
+        subArray=[]
+        # Get list of heights for x-y positions within the 
+        # range of the tip, along with coordinates
+        if radius>=sq_root(0,arrLen/width,0,arrLen/width):
+            for j in range(0,arrLen):
+                for i in range(0,arrLen):
+                    subArray.append([array[j][i],[j,i]])
+        else:
+            for j in range(max(0,sy-pixRad),min(arrLen,sy+pixRad)):
+                for i in range(max(0,sx-pixRad),min(arrLen,sx+pixRad)):
+                    if sq_root(j,sy,i,sx)/width<=radius:
+                        subArray.append([array[j][i],[j,i]])
+        propTipH=array[sy][sx]
+        subArray.sort()
+
+
+        # Loop over peaks to find at what tip height
+        # above (sy,sx) that makes contact with the
+        # surface of the material
+    
+        while True:
+            newHs=[]
+            for h,index in subArray:
+                iy,ix=index
+                distFromTip=sq_root(ix,sx,iy,sy)/width
+                tempH=getTipH(distFromTip,
+                                h-propTipH,
+                                radius)
+                newHs.append([round(tempH,6),h,index])
+            newHs.sort()
+            # If tip is touching the rate limiting
+            # peak, end the loop
+            if -1E-4<newHs[0][0]<1E-4:
+                break
+            # Else, shift tip to be closer to peak
+            else:
+                propTipH-=newHs[0][0]
+        
+
+        ref1=newHs[0]
+
+        # Find the new center of the tip
+        sphereCenter=(radius**2-((ref1[2][0]-sy)/width)**2-\
+                        ((ref1[2][1]-sx)/width)**2)**.5+ref1[1]
+        # Pixel height is either the new position of the tip,
+        # or the original height
+        newArray[sy][sx]=max(sphereCenter-radius,array[sy][sx])
+            
+
+    # Set the lowest position pixel to be constant
+    # to ensure proper contrast
+    newArray[min_indy][min_indx]=min_height
+    return(newArray)
+
+
+
 def apply_rotation(img, rotation):
     """
     Apply centered rotation to an image and crop collars.
