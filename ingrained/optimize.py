@@ -50,7 +50,7 @@ class CongruityBuilder(object):
         self.exp_img = exp_img
         self.iter = iter
 
-    def fit(self, sim_params=[], display=False, bias_x=0.0, bias_y=0.0):
+    def fit(self, sim_params=[], display=False, bias_x=0.0, bias_y=0.0,tipRad=0):
         """
         Find optimal correspondence between simulation and
         experiment for the specified parameters.
@@ -61,6 +61,7 @@ class CongruityBuilder(object):
             display: (string) plt.show() for intermediate/final fit results
             bias_x: (float) reduce search area in the x-direction by a fraction
             bias_y: (float) reduce search area in the y-direction by a fraction
+            tipRad: (float) The radius of the tip considered for smoothing
 
         Returns:
             Both 'fit' experimental and simulated image with the
@@ -71,6 +72,11 @@ class CongruityBuilder(object):
         sim_img, sim_struct = self.sim_obj.simulate_image(
             sim_params=sim_params,
         )
+
+
+        if tipRad>0:
+            sim_img = iop.apply_tip_smoothing(sim_img,tipRad,1/sim_params[-4],\
+                            prec=1*(sim_img.max()-sim_img.min()),bounds=[0,-1])
 
         # Display simulated image
         # self.sim_obj.display()
